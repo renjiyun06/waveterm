@@ -7,6 +7,7 @@ import { getTabModelByTabId } from "@/app/store/tab-model";
 import { makeORef } from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { useWaveEnv } from "@/app/waveenv/waveenv";
+import { shouldShowWorkspaceTopBar } from "@/app/workspace/fullscreen";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { validateCssColor } from "@/util/color-validator";
 import { cn, fireAndForget } from "@/util/util";
@@ -51,19 +52,20 @@ VTabBarAIButton.displayName = "VTabBarAIButton";
 const MacOSHeader = memo(() => {
     const env = useWaveEnv<VTabBarEnv>();
     const isFullScreen = useAtomValue(env.atoms.isFullScreen);
+    if (!shouldShowWorkspaceTopBar(isFullScreen)) {
+        return null;
+    }
     return (
         <>
-            {!isFullScreen && (
-                <div
-                    className="w-full shrink-0"
-                    style={
-                        {
-                            height: "calc(25px * var(--zoomfactor-inv))",
-                            WebkitAppRegion: "drag",
-                        } as React.CSSProperties
-                    }
-                />
-            )}
+            <div
+                className="w-full shrink-0"
+                style={
+                    {
+                        height: "calc(25px * var(--zoomfactor-inv))",
+                        WebkitAppRegion: "drag",
+                    } as React.CSSProperties
+                }
+            />
             <div
                 className="flex shrink-0 flex-row flex-wrap items-end px-1 pb-1 pl-2"
                 style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}

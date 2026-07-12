@@ -15,6 +15,8 @@ Tabs are collections of [Widgets](./widgets) that can be arranged into tiled das
 
 The tab bar is located at the top of the window and shows all tabs within a given workspace. You can click on a tab to switch to it. When switching tabs, any commands in the previous tab will continue running and any unsaved work will be persisted until you return to it. If you close the window or switch workspaces within the same window, that work will be lost.
 
+Pressing <Kbd k="F11" /> enters full-screen mode and hides the top bar so the active tab can use the entire window. Press <Kbd k="F11" /> again to restore the top bar. An open Wave AI panel keeps its current state while the top-bar toggle is hidden.
+
 <PlatformSelectorButton />
 
 ### Creating a new tab
@@ -76,6 +78,10 @@ You can add new blocks by selecting a widget from the right sidebar.
 Starting at the topmost level of the tree, since the first level tiles as a row, new blocks will be added to the right side of existing blocks. Once there are 5 blocks across, new blocks will begin being added below existing blocks, starting from the right side and working to the left. As a new block gets added below an existing one, the node containing the existing block is converted from a single-block node to a list node and the existing block definition is moved one level deeper in the tree as the first element of the node list. New blocks will always be added to the last-available node in the deepest level, where available is defined as having less than five children. We don't set a limit on the number of blocks in a tab, but you may experience degraded performance past around 25 blocks.
 
 While we define a 5-child limit for each node in the tree when automatically placing new blocks, there is no actual limit to the number of children a node can hold. After the block is placed, you are free to move it wherever in the layout
+
+#### Rename a block
+
+Right-click a block header and select **Rename Block** to give that block a custom title. Block titles are saved with the layout and can be different for every block in a split. Clear the title in the rename dialog to restore the block's default title.
 
 #### Delete a block
 

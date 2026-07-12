@@ -8,6 +8,7 @@ import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabBar } from "@/app/tab/tabbar";
 import { TabContent } from "@/app/tab/tabcontent";
 import { VTabBar } from "@/app/tab/vtabbar";
+import { shouldShowWorkspaceTopBar } from "@/app/workspace/fullscreen";
 import { Widgets } from "@/app/workspace/widgets";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { atoms, getApi, getSettingsKeyAtom } from "@/store/global";
@@ -45,6 +46,8 @@ const WorkspaceElem = memo(() => {
     const ws = useAtomValue(atoms.workspace);
     const tabBarPosition = useAtomValue(getSettingsKeyAtom("app:tabbar")) ?? "top";
     const showLeftTabBar = tabBarPosition === "left";
+    const isFullScreen = useAtomValue(atoms.isFullScreen);
+    const showTopBar = shouldShowWorkspaceTopBar(isFullScreen);
     const aiPanelVisible = useAtomValue(workspaceLayoutModel.panelVisibleAtom);
     const widgetsSidebarVisible = useAtomValue(workspaceLayoutModel.widgetsSidebarVisibleAtom);
     const windowWidth = window.innerWidth;
@@ -109,8 +112,10 @@ const WorkspaceElem = memo(() => {
 
     return (
         <div className="flex flex-col w-full flex-grow overflow-hidden">
-            {!(showLeftTabBar && isMacOS()) && <TabBar key={ws.oid} workspace={ws} noTabs={showLeftTabBar} />}
-            {showLeftTabBar && isMacOS() && <MacOSTabBarSpacer />}
+            {showTopBar && !(showLeftTabBar && isMacOS()) && (
+                <TabBar key={ws.oid} workspace={ws} noTabs={showLeftTabBar} />
+            )}
+            {showTopBar && showLeftTabBar && isMacOS() && <MacOSTabBarSpacer />}
             <div ref={panelContainerRef} className="flex flex-row flex-grow overflow-hidden">
                 <ErrorBoundary key={tabId}>
                     <PanelGroup

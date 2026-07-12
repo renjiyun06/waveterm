@@ -1,6 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getBlockTitleMetaKey } from "@/app/block/blocktitle";
 import {
     blockViewToIcon,
     blockViewToName,
@@ -20,6 +21,7 @@ import {
 } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { uxCloseBlock } from "@/app/store/keymodel";
+import { modalsModel } from "@/app/store/modalmodel";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { useWaveEnv } from "@/app/waveenv/waveenv";
 import { IconButton } from "@/element/iconbutton";
@@ -41,7 +43,22 @@ function handleHeaderContextMenu(
     e.preventDefault();
     e.stopPropagation();
     const magnified = globalStore.get(nodeModel.isMagnified);
+    const useTermHeader = viewModel?.useTermHeader ? globalStore.get(viewModel.useTermHeader) : false;
+    const titleKey = getBlockTitleMetaKey(useTermHeader);
+    const blockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", blockId));
+    const blockData = globalStore.get(blockAtom);
+    const currentTitle = blockData?.meta?.[titleKey];
     const menu: ContextMenuItem[] = [
+        {
+            label: "Rename Block",
+            click: () => {
+                modalsModel.pushModal("RenameBlockModal", {
+                    blockId,
+                    currentTitle: typeof currentTitle === "string" ? currentTitle : "",
+                    titleKey,
+                });
+            },
+        },
         {
             label: magnified ? "Un-Magnify Block" : "Magnify Block",
             click: () => {
