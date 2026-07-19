@@ -102,6 +102,8 @@ const (
 	MetaKey_LayoutVTabBarWidth               = "layout:vtabbarwidth"
 	MetaKey_LayoutWidgetsVisible             = "layout:widgetsvisible"
 
+	MetaKey_FileWorkspaceRoots               = "fileworkspace:roots"
+
 	MetaKey_WaveAiPanelOpen                  = "waveai:panelopen"
 	MetaKey_WaveAiPanelWidth                 = "waveai:panelwidth"
 	MetaKey_WaveAiModel                      = "waveai:model"

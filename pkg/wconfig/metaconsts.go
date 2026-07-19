@@ -8,6 +8,7 @@ package wconfig
 const (
 	ConfigKey_AppClear                       = "app:*"
 	ConfigKey_AppGlobalHotkey                = "app:globalhotkey"
+	ConfigKey_AppFileWorkspaceKeybinding     = "app:fileworkspacekeybinding"
 	ConfigKey_AppDismissArchitectureWarning  = "app:dismissarchitecturewarning"
 	ConfigKey_AppDefaultNewBlock             = "app:defaultnewblock"
 	ConfigKey_AppShowOverlayBlockNums        = "app:showoverlayblocknums"

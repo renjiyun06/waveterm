@@ -546,6 +546,16 @@ declare global {
         streammeta: StreamMeta;
     };
 
+    // wshrpc.CommandRemoteGitFileDiffData
+    type CommandRemoteGitFileDiffData = {
+        path: string;
+    };
+
+    // wshrpc.CommandRemoteGitStatusData
+    type CommandRemoteGitStatusData = {
+        path: string;
+    };
+
     // wshrpc.CommandRemoteListEntriesData
     type CommandRemoteListEntriesData = {
         path: string;
@@ -994,6 +1004,14 @@ declare global {
         append?: boolean;
     };
 
+    // waveobj.FileWorkspaceRoot
+    type FileWorkspaceRoot = {
+        id: string;
+        connection: string;
+        path: string;
+        name?: string;
+    };
+
     // wshrpc.FocusedBlockData
     type FocusedBlockData = {
         blockid: string;
@@ -1022,6 +1040,45 @@ declare global {
         configerrors: ConfigError[];
         version: string;
         buildtime: string;
+    };
+
+    // wshrpc.GitDiffHunk
+    type GitDiffHunk = {
+        oldstart: number;
+        oldlines: number;
+        newstart: number;
+        newlines: number;
+    };
+
+    // wshrpc.GitFileDiffResponse
+    type GitFileDiffResponse = {
+        isrepo: boolean;
+        root?: string;
+        path?: string;
+        status?: string;
+        binary?: boolean;
+        hunks?: GitDiffHunk[];
+    };
+
+    // wshrpc.GitFileStatus
+    type GitFileStatus = {
+        path: string;
+        abspath: string;
+        status: string;
+        indexstatus?: string;
+        worktreestatus?: string;
+    };
+
+    // wshrpc.GitStatusResponse
+    type GitStatusResponse = {
+        isrepo: boolean;
+        dirty: boolean;
+        root?: string;
+        branch?: string;
+        ahead?: number;
+        behind?: number;
+        files?: GitFileStatus[];
+        ts: number;
     };
 
     // waveobj.Job
@@ -1164,6 +1221,7 @@ declare global {
         "bg:activebordercolor"?: string;
         "layout:vtabbarwidth"?: number;
         "layout:widgetsvisible"?: boolean;
+        "fileworkspace:roots"?: FileWorkspaceRoot[];
         "waveai:panelopen"?: boolean;
         "waveai:panelwidth"?: number;
         "waveai:model"?: string;
@@ -1377,6 +1435,7 @@ declare global {
     type SettingsType = {
         "app:*"?: boolean;
         "app:globalhotkey"?: string;
+        "app:fileworkspacekeybinding"?: string;
         "app:dismissarchitecturewarning"?: boolean;
         "app:defaultnewblock"?: string;
         "app:showoverlayblocknums"?: boolean;
@@ -1589,6 +1648,7 @@ declare global {
         "debug:panictype"?: string;
         "block:view"?: string;
         "block:controller"?: string;
+        "block:subblock"?: boolean;
         "ai:backendtype"?: string;
         "ai:local"?: boolean;
         "wsh:cmd"?: string;

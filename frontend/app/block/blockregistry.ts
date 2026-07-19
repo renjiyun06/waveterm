@@ -4,6 +4,7 @@
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { TabModel } from "@/app/store/tab-model";
 import { AiFileDiffViewModel } from "@/app/view/aifilediff/aifilediff";
+import { FileWorkspaceViewModel } from "@/app/view/fileworkspace/fileworkspace-model";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { PreviewModel } from "@/app/view/preview/preview-model";
 import { ProcessViewerViewModel } from "@/app/view/processviewer/processviewer";
@@ -23,6 +24,7 @@ import { WebViewModel } from "@/view/webview/webview";
 const BlockRegistry: Map<string, ViewModelClass> = new Map();
 BlockRegistry.set("term", TermViewModel);
 BlockRegistry.set("preview", PreviewModel);
+BlockRegistry.set("fileworkspace", FileWorkspaceViewModel);
 BlockRegistry.set("web", WebViewModel);
 BlockRegistry.set("waveai", WaveAiModel);
 BlockRegistry.set("cpuplot", SysinfoViewModel);

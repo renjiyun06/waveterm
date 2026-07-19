@@ -50,6 +50,7 @@ declare global {
 
     type TabLayoutData = {
         blockId: string;
+        ephemeralPosition?: "center" | "top" | "bottom";
     };
 
     type GlobalInitOptions = {
@@ -360,6 +361,9 @@ declare global {
 
         // Handles keydown events within the block.
         keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
+
+        // Allows a view to cancel closing, for example when it has unsaved work.
+        requestClose?: () => boolean;
 
         // Cleans up resources when the block is disposed.
         dispose?: () => void;

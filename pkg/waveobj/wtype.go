@@ -171,6 +171,13 @@ type ActiveTabUpdate struct {
 	NewActiveTabId string `json:"newactivetabid"`
 }
 
+type FileWorkspaceRoot struct {
+	Id         string `json:"id"`
+	Connection string `json:"connection"`
+	Path       string `json:"path"`
+	Name       string `json:"name,omitempty"`
+}
+
 type Workspace struct {
 	OID         string      `json:"oid"`
 	Version     int         `json:"version"`

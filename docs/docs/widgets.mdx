@@ -55,6 +55,14 @@ The usual terminal you know and love. We add a few plugins via the `wsh` command
 Preview is the generic type of widget used for viewing files. This can take many different forms based on the type of file being viewed.
 You can use \`wsh view [path]\` from any Wave terminal window to open a preview widget with the contents of the specified path (e.g. `wsh view .` or `wsh view ~/myimage.jpg`).
 
+### File Workspace
+
+Press <Kbd k="Cmd:Shift:e" /> to slide a temporary file workspace down over the current terminal layout. Press the shortcut again to close it. Change the shortcut with `app:fileworkspacekeybinding` in `settings.json`; changes apply immediately. The panel uses the focused block's connection and lets you switch connections from its header.
+
+Folders added to the explorer are stored with the current Wave workspace and can be removed without deleting them from disk. Each connection has its own folder list. Git repositories show dirty folders and files, while the editor gutter marks added, modified, and deleted lines. Unsaved editor changes are shown separately from Git status.
+
+The panel uses the `window:magnifiedblockopacity` setting for transparency.
+
 #### Directory
 
 When looking at a directory, preview will show a file viewer much like MacOS' _Finder_ application or Windows' _File Explorer_ application. This variant is slightly more geared toward software development with the focus on seeing what is shown by the `ls -alh` command.

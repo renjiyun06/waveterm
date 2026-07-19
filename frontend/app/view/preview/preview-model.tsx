@@ -161,6 +161,9 @@ export class PreviewModel implements ViewModel {
     markdownShowToc: PrimitiveAtom<boolean>;
 
     monacoRef: React.RefObject<MonacoTypes.editor.IStandaloneCodeEditor>;
+    gitDiffHunksAtom: PrimitiveAtom<GitDiffHunk[]>;
+    gitFileStatusAtom: PrimitiveAtom<string>;
+    onFileSaved?: () => void;
 
     showHiddenFiles: PrimitiveAtom<boolean>;
     refreshVersion: PrimitiveAtom<number>;
@@ -190,6 +193,8 @@ export class PreviewModel implements ViewModel {
         this.markdownShowToc = atom(false);
         this.filterOutNowsh = atom(true);
         this.monacoRef = createRef();
+        this.gitDiffHunksAtom = atom<GitDiffHunk[]>([]);
+        this.gitFileStatusAtom = atom<string>("");
         this.connectionError = atom("");
         this.errorMsgAtom = atom(null) as PrimitiveAtom<ErrorMsg | null>;
         this.viewIcon = atom((get) => {
@@ -664,6 +669,7 @@ export class PreviewModel implements ViewModel {
             });
             globalStore.set(this.fileContent, newFileContent);
             globalStore.set(this.newFileContent, null);
+            this.onFileSaved?.();
             console.log("saved file", filePath);
         } catch (e) {
             const errorStatus: ErrorMsg = {

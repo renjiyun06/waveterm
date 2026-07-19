@@ -37,6 +37,8 @@ const simpleControlShiftAtom = jotai.atom(false);
 const globalKeyMap = new Map<string, (waveEvent: WaveKeyboardEvent) => boolean>();
 const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
+let fileWorkspaceKeybinding = "";
+let fileWorkspaceKeybindingUnsubscribe: () => void;
 
 // track current chord state and timeout (for resetting)
 let activeChord: string | null = null;
@@ -145,6 +147,10 @@ function simpleCloseStaticTab() {
 }
 
 function uxCloseBlock(blockId: string) {
+    const blockComponentModel = getBlockComponentModel(blockId);
+    if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+        return;
+    }
     const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
     const isAIPanelOpen = workspaceLayoutModel.getAIPanelVisible();
     if (isAIPanelOpen && getStaticTabBlockCount() === 1) {
@@ -201,6 +207,13 @@ function genericClose() {
             }
         }
     }
+    const layoutModel = getLayoutModelForStaticTab();
+    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const blockId = focusedNode?.data?.blockId;
+    const blockComponentModel = blockId ? getBlockComponentModel(blockId) : null;
+    if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+        return;
+    }
     const blockCount = getStaticTabBlockCount();
     if (blockCount === 0) {
         simpleCloseStaticTab();
@@ -214,9 +227,6 @@ function genericClose() {
         return;
     }
 
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
-    const blockId = focusedNode?.data?.blockId;
     const blockAtom = blockId ? WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", blockId)) : null;
     const blockData = blockAtom ? globalStore.get(blockAtom) : null;
     const isAIFileDiff = blockData?.meta?.view === "aifilediff";
@@ -400,6 +410,41 @@ async function handleSplitVertical(position: "before" | "after") {
     await createBlockSplitVertically(blockDef, focusedNode.data.blockId, position);
 }
 
+function toggleFileWorkspace() {
+    const layoutModel = getLayoutModelForStaticTab();
+    const ephemeralNode = globalStore.get(layoutModel.ephemeralNode);
+    if (ephemeralNode != null) {
+        const ephemeralBlockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", ephemeralNode.data.blockId));
+        const ephemeralBlock = globalStore.get(ephemeralBlockAtom);
+        if (ephemeralBlock?.meta?.view == "fileworkspace") {
+            const blockComponentModel = getBlockComponentModel(ephemeralNode.data.blockId);
+            if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+                return;
+            }
+            fireAndForget(() => layoutModel.closeNode(ephemeralNode.id));
+            return;
+        }
+    }
+
+    const focusedBlockId = getFocusedBlockId();
+    const focusedBlockAtom = focusedBlockId
+        ? WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", focusedBlockId))
+        : null;
+    const focusedBlock = focusedBlockAtom ? globalStore.get(focusedBlockAtom) : null;
+    fireAndForget(() =>
+        createBlock(
+            {
+                meta: {
+                    view: "fileworkspace",
+                    connection: focusedBlock?.meta?.connection,
+                },
+            },
+            false,
+            true
+        )
+    );
+}
+
 let lastHandledEvent: KeyboardEvent | null = null;
 
 // returns [keymatch, T]
@@ -411,6 +456,31 @@ function checkKeyMap<T>(waveEvent: WaveKeyboardEvent, keyMap: Map<string, T>): [
         }
     }
     return [null, null];
+}
+
+function registerGlobalWebviewKeys() {
+    const allKeys = Array.from(globalKeyMap.keys());
+    if (fileWorkspaceKeybinding) {
+        allKeys.push(fileWorkspaceKeybinding);
+    }
+    allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
+    getApi().registerGlobalWebviewKeys(Array.from(new Set(allKeys)));
+}
+
+function refreshFileWorkspaceKeybinding() {
+    const configuredKeybinding = globalStore.get(getSettingsKeyAtom("app:fileworkspacekeybinding"));
+    fileWorkspaceKeybinding = typeof configuredKeybinding == "string" ? configuredKeybinding.trim() : "";
+    registerGlobalWebviewKeys();
+}
+
+function registerConfigurableKeybindings() {
+    refreshFileWorkspaceKeybinding();
+    if (fileWorkspaceKeybindingUnsubscribe == null) {
+        fileWorkspaceKeybindingUnsubscribe = globalStore.sub(
+            getSettingsKeyAtom("app:fileworkspacekeybinding"),
+            refreshFileWorkspaceKeybinding
+        );
+    }
 }
 
 function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
@@ -435,6 +505,10 @@ function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
             resetChord();
             return true;
         }
+    }
+    if (isTabWindow() && fileWorkspaceKeybinding && keyutil.checkKeyPressed(waveEvent, fileWorkspaceKeybinding)) {
+        toggleFileWorkspace();
+        return true;
     }
     const [chordKeyMatch] = checkKeyMap(waveEvent, globalChordMap);
     if (chordKeyMatch) {
@@ -745,10 +819,7 @@ function registerGlobalKeys() {
         WorkspaceLayoutModel.getInstance().setAIPanelVisible(!currentVisible);
         return true;
     });
-    const allKeys = Array.from(globalKeyMap.keys());
-    // special case keys, handled by web view
-    allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
-    getApi().registerGlobalWebviewKeys(allKeys);
+    registerGlobalWebviewKeys();
 
     const splitBlockKeys = new Map<string, KeyHandler>();
     splitBlockKeys.set("ArrowUp", () => {
@@ -781,6 +852,9 @@ function registerBuilderGlobalKeys() {
 
 function getAllGlobalKeyBindings(): string[] {
     const allKeys = Array.from(globalKeyMap.keys());
+    if (fileWorkspaceKeybinding) {
+        allKeys.push(fileWorkspaceKeybinding);
+    }
     return allKeys;
 }
 
@@ -792,6 +866,7 @@ export {
     globalRefocus,
     globalRefocusWithTimeout,
     registerBuilderGlobalKeys,
+    registerConfigurableKeybindings,
     registerControlShiftStateUpdateHandler,
     registerElectronReinjectKeyHandler,
     registerGlobalKeys,

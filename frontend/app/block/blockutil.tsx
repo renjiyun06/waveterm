@@ -30,6 +30,9 @@ export function blockViewToIcon(view: string): string {
     if (view == "preview") {
         return "file";
     }
+    if (view == "fileworkspace") {
+        return "folder-tree";
+    }
     if (view == "web") {
         return "globe";
     }
@@ -57,6 +60,9 @@ export function blockViewToName(view: string): string {
     }
     if (view == "preview") {
         return "Preview";
+    }
+    if (view == "fileworkspace") {
+        return "File Workspace";
     }
     if (view == "web") {
         return "Web";

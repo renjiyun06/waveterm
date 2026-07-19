@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getSettingsKeyAtom } from "@/app/store/global";
+import { getBlockComponentModel, getSettingsKeyAtom } from "@/app/store/global";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
 import { Atom, useAtomValue, useSetAtom } from "jotai";
@@ -182,6 +182,11 @@ function NodeBackdrops({ layoutModel }: { layoutModel: LayoutModel }) {
                 <div
                     className="ephemeral-node-backdrop"
                     onClick={() => {
+                        const blockId = ephemeralNode?.data?.blockId;
+                        const blockComponentModel = blockId ? getBlockComponentModel(blockId) : null;
+                        if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+                            return;
+                        }
                         layoutModel.closeNode(ephemeralNode?.id);
                     }}
                     style={{ "--block-blur": blockBlurStr } as CSSProperties}

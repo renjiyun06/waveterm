@@ -410,7 +410,8 @@ async function createBlock(blockDef: BlockDef, magnified = false, ephemeral = fa
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
     if (ephemeral) {
-        layoutModel.newEphemeralNode(blockId);
+        const position = blockDef.meta?.view == "fileworkspace" ? "top" : "center";
+        layoutModel.newEphemeralNode(blockId, position);
         return blockId;
     }
     const insertNodeAction: LayoutTreeInsertNodeAction = {

@@ -1318,12 +1318,15 @@ export class LayoutModel {
         await this.closeNode(this.focusedNodeId);
     }
 
-    newEphemeralNode(blockId: string) {
+    newEphemeralNode(blockId: string, position: TabLayoutData["ephemeralPosition"] = "center") {
         if (this.getter(this.ephemeralNode)) {
             this.closeNode(this.getter(this.ephemeralNode).id);
         }
 
-        const ephemeralNode = newLayoutNode(undefined, undefined, undefined, { blockId });
+        const ephemeralNode = newLayoutNode(undefined, undefined, undefined, {
+            blockId,
+            ephemeralPosition: position,
+        });
         this.setter(this.ephemeralNode, ephemeralNode);
 
         const addlProps = this.getter(this.additionalProps);
@@ -1360,21 +1363,29 @@ export class LayoutModel {
         magnifiedNodeSizePct: number,
         boundingRect: Dimensions
     ) {
-        const ephemeralNodeSizePct = this.magnifiedNodeId
-            ? magnifiedNodeSizePct * magnifiedNodeSizePct
-            : magnifiedNodeSizePct;
-        const ephemeralNodeMarginPct = (1 - ephemeralNodeSizePct) / 2;
-        const transform = setTransform(
-            {
+        const position = node.data.ephemeralPosition ?? "center";
+        let rect: Dimensions;
+        if (position == "top" || position == "bottom") {
+            const height = boundingRect.height * 0.78;
+            rect = {
+                top: position == "top" ? 0 : boundingRect.height - height,
+                left: 0,
+                width: boundingRect.width,
+                height,
+            };
+        } else {
+            const ephemeralNodeSizePct = this.magnifiedNodeId
+                ? magnifiedNodeSizePct * magnifiedNodeSizePct
+                : magnifiedNodeSizePct;
+            const ephemeralNodeMarginPct = (1 - ephemeralNodeSizePct) / 2;
+            rect = {
                 top: boundingRect.height * ephemeralNodeMarginPct,
                 left: boundingRect.width * ephemeralNodeMarginPct,
                 width: boundingRect.width * ephemeralNodeSizePct,
                 height: boundingRect.height * ephemeralNodeSizePct,
-            },
-            true,
-            true,
-            "var(--zindex-layout-ephemeral-node)"
-        );
+            };
+        }
+        const transform = setTransform(rect, true, true, "var(--zindex-layout-ephemeral-node)");
         addlPropsMap[node.id] = { treeKey: "-1", transform };
         leafs.push(node);
     }

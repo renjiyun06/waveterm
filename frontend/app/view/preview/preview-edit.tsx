@@ -9,7 +9,7 @@ import { fireAndForget } from "@/util/util";
 import { useAtomValue, useSetAtom } from "jotai";
 import type * as MonacoTypes from "monaco-editor";
 import * as monaco from "monaco-editor";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SpecializedViewProps } from "./preview";
 
 export const shellFileMap: Record<string, string> = {
@@ -36,10 +36,46 @@ export const shellFileMap: Record<string, string> = {
     ".gvimrc": "shell",
 };
 
+function getGitDiffDecorations(
+    hunks: GitDiffHunk[],
+    monacoApi: typeof monaco
+): MonacoTypes.editor.IModelDeltaDecoration[] {
+    return hunks.map((hunk) => {
+        let changeType = "modified";
+        let color = "#58a6ff";
+        if (hunk.oldlines == 0) {
+            changeType = "added";
+            color = "#3fb950";
+        } else if (hunk.newlines == 0) {
+            changeType = "deleted";
+            color = "#f85149";
+        }
+        const startLine = Math.max(1, hunk.newstart);
+        const endLine = Math.max(startLine, startLine + Math.max(1, hunk.newlines) - 1);
+        return {
+            range: new monacoApi.Range(startLine, 1, endLine, 1),
+            options: {
+                isWholeLine: true,
+                linesDecorationsClassName: `git-change-${changeType}`,
+                overviewRuler: {
+                    color,
+                    position: monacoApi.editor.OverviewRulerLane.Full,
+                },
+                minimap: {
+                    color,
+                    position: monacoApi.editor.MinimapPosition.Gutter,
+                },
+            },
+        };
+    });
+}
+
 function CodeEditPreview({ model }: SpecializedViewProps) {
     const fileContent = useAtomValue(model.fileContent);
     const setNewFileContent = useSetAtom(model.newFileContent);
     const fileInfo = useAtomValue(model.statFile);
+    const gitDiffHunks = useAtomValue(model.gitDiffHunksAtom);
+    const gitDecorationsRef = useRef<MonacoTypes.editor.IEditorDecorationsCollection>(null);
     const fileName = fileInfo?.path || fileInfo?.name;
 
     const baseName = fileName ? fileName.split("/").pop() : null;
@@ -73,8 +109,15 @@ function CodeEditPreview({ model }: SpecializedViewProps) {
         };
     }, []);
 
+    useEffect(() => {
+        gitDecorationsRef.current?.set(getGitDiffDecorations(gitDiffHunks, monaco));
+    }, [gitDiffHunks]);
+
     function onMount(editor: MonacoTypes.editor.IStandaloneCodeEditor, monacoApi: typeof monaco): () => void {
         model.monacoRef.current = editor;
+        gitDecorationsRef.current = editor.createDecorationsCollection(
+            getGitDiffDecorations(globalStore.get(model.gitDiffHunksAtom), monacoApi)
+        );
 
         const keyDownDisposer = editor.onKeyDown((e: MonacoTypes.IKeyboardEvent) => {
             const waveEvent = adaptFromReactOrNativeKeyEvent(e.browserEvent);
@@ -92,6 +135,8 @@ function CodeEditPreview({ model }: SpecializedViewProps) {
 
         return () => {
             keyDownDisposer.dispose();
+            gitDecorationsRef.current?.clear();
+            gitDecorationsRef.current = null;
         };
     }
 

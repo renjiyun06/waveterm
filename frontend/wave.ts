@@ -8,6 +8,7 @@ import { GlobalModel } from "@/app/store/global-model";
 import {
     globalRefocus,
     registerBuilderGlobalKeys,
+    registerConfigurableKeybindings,
     registerControlShiftStateUpdateHandler,
     registerElectronReinjectKeyHandler,
     registerGlobalKeys,
@@ -194,6 +195,7 @@ async function initWave(initOpts: WaveInitOpts) {
     const fullConfig = await RpcApi.GetFullConfigCommand(TabRpcClient);
     console.log("fullconfig", fullConfig);
     globalStore.set(atoms.fullConfigAtom, fullConfig);
+    registerConfigurableKeybindings();
     const waveaiModeConfig = await RpcApi.GetWaveAIModeConfigCommand(TabRpcClient);
     globalStore.set(atoms.waveaiModeConfigAtom, waveaiModeConfig.configs);
     console.log("Wave First Render");

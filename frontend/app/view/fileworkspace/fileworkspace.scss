@@ -1,0 +1,48 @@
+// Copyright 2026, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+@keyframes fileworkspace-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(-24px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fileworkspace-slide-in {
+    animation: fileworkspace-slide-in 160ms ease-out;
+}
+
+.fileworkspace-preview {
+    display: flex;
+
+    > div:first-child {
+        flex: 1;
+        height: 100%;
+    }
+}
+
+.fileworkspace-opacity-slider {
+    accent-color: var(--accent-color);
+}
+
+.monaco-editor {
+    .git-change-added {
+        border-left: 3px solid #3fb950;
+        margin-left: 3px;
+    }
+
+    .git-change-modified {
+        border-left: 3px solid #58a6ff;
+        margin-left: 3px;
+    }
+
+    .git-change-deleted {
+        border-left: 3px solid #f85149;
+        margin-left: 3px;
+    }
+}

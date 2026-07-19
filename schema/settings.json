@@ -11,6 +11,9 @@
         "app:globalhotkey": {
           "type": "string"
         },
+        "app:fileworkspacekeybinding": {
+          "type": "string"
+        },
         "app:dismissarchitecturewarning": {
           "type": "boolean"
         },
