@@ -115,8 +115,8 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
         waveEnv.getSettingsKeyAtom("window:magnifiedblockopacity")
     );
     const magnifiedBlockOpacity = jotai.useAtomValue(magnifiedBlockOpacityAtom);
-    const [fileWorkspaceOpacityAtom] = React.useState(() => waveEnv.getSettingsKeyAtom("fileworkspace:opacity"));
-    const fileWorkspaceOpacity = jotai.useAtomValue(fileWorkspaceOpacityAtom);
+    const [workbenchOpacityAtom] = React.useState(() => waveEnv.getSettingsKeyAtom("fileworkspace:opacity"));
+    const workbenchOpacity = jotai.useAtomValue(workbenchOpacityAtom) ?? 0.9;
     const connBtnRef = React.useRef<HTMLDivElement>(null);
     const connName = jotai.useAtomValue(waveEnv.getBlockMetaKeyAtom(nodeModel.blockId, "connection"));
     const iconColor = jotai.useAtomValue(waveEnv.getBlockMetaKeyAtom(nodeModel.blockId, "icon:color"));
@@ -168,8 +168,8 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
         <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} />
     );
     const headerElemNoView = React.cloneElement(headerElem, { viewModel: null });
-    const blockOpacity =
-        metaView == "fileworkspace" || isEphemeralSession ? fileWorkspaceOpacity : magnifiedBlockOpacity;
+    const blockBackgroundOpacity =
+        metaView == "fileworkspace" && !isEphemeralSession ? workbenchOpacity : magnifiedBlockOpacity;
     return (
         <div
             className={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
@@ -186,8 +186,9 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
             ref={blockModel?.blockRef}
             style={
                 {
-                    "--magnified-block-opacity": blockOpacity,
+                    "--magnified-block-opacity": blockBackgroundOpacity,
                     "--magnified-block-blur": `${magnifiedBlockBlur}px`,
+                    opacity: isEphemeralSession ? workbenchOpacity : undefined,
                 } as React.CSSProperties
             }
             inert={preview || undefined}

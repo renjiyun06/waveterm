@@ -267,6 +267,8 @@
                 .block-frame-end-icons {
                     display: flex;
                     flex-shrink: 0;
+                    align-items: center;
+                    gap: 1px;
 
                     .wave-iconbutton {
                         display: flex;
@@ -481,4 +483,17 @@
             }
         }
     }
+}
+
+.ephemeral-workbench-setting-slider {
+    accent-color: var(--accent-color);
+}
+
+.ephemeral-workbench-settings-popover {
+    display: block;
+    width: min(250px, calc(100vw - 16px));
+    min-width: 0;
+    min-height: 0;
+    padding: 12px;
+    background: var(--block-bg-solid-color, #212121);
 }

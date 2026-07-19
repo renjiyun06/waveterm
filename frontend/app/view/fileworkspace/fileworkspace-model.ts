@@ -72,9 +72,6 @@ export class FileWorkspaceViewModel implements ViewModel {
     rootsAtom: jotai.Atom<FileWorkspaceRoot[]>;
     activeRootsAtom: jotai.Atom<FileWorkspaceRoot[]>;
     connectionAtom: jotai.Atom<string>;
-    opacityAtom: jotai.Atom<number>;
-    panelWidthAtom: jotai.Atom<number>;
-    panelHeightAtom: jotai.Atom<number>;
     activeTabAtom: jotai.Atom<FileWorkspaceTab>;
     selectedRootIdAtom: jotai.Atom<string>;
     selectedPathAtom: jotai.Atom<string>;
@@ -121,9 +118,6 @@ export class FileWorkspaceViewModel implements ViewModel {
         });
         this.selectedRootIdAtom = jotai.atom((get) => get(this.activeTabAtom)?.rootId ?? "");
         this.selectedPathAtom = jotai.atom((get) => get(this.activeTabAtom)?.path ?? "");
-        this.opacityAtom = this.env.getSettingsKeyAtom("fileworkspace:opacity");
-        this.panelWidthAtom = this.env.getSettingsKeyAtom("fileworkspace:width");
-        this.panelHeightAtom = this.env.getSettingsKeyAtom("fileworkspace:height");
 
         const workspace = globalStore.get(this.env.atoms.workspace);
         this.workspaceStates = (workspace?.meta?.["fileworkspace:states"] ?? []).map((state) => ({
@@ -620,27 +614,6 @@ export class FileWorkspaceViewModel implements ViewModel {
         } finally {
             this.gitRefreshPending = false;
         }
-    }
-
-    async setOpacity(opacity: number) {
-        const nextOpacity = Math.min(1, Math.max(0.2, opacity));
-        await this.env.rpc.SetConfigCommand(TabRpcClient, {
-            "fileworkspace:opacity": nextOpacity,
-        });
-    }
-
-    async setPanelWidth(width: number) {
-        const nextWidth = Math.min(1, Math.max(0.4, width));
-        await this.env.rpc.SetConfigCommand(TabRpcClient, {
-            "fileworkspace:width": nextWidth,
-        });
-    }
-
-    async setPanelHeight(height: number) {
-        const nextHeight = Math.min(1, Math.max(0.3, height));
-        await this.env.rpc.SetConfigCommand(TabRpcClient, {
-            "fileworkspace:height": nextHeight,
-        });
     }
 
     async refreshSelectedFileDiff() {

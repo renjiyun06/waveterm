@@ -11,6 +11,7 @@ import {
 } from "@/app/block/blockutil";
 import { ConnectionButton } from "@/app/block/connectionbutton";
 import { DurableSessionFlyover } from "@/app/block/durable-session-flyover";
+import { Popover, PopoverButton, PopoverContent } from "@/app/element/popover";
 import { getBlockBadgeAtom } from "@/app/store/badge";
 import {
     createBlockSplitHorizontally,
@@ -27,8 +28,10 @@ import { useWaveEnv } from "@/app/waveenv/waveenv";
 import { IconButton } from "@/element/iconbutton";
 import type { EphemeralSessionMode } from "@/layout/index";
 import { NodeModel } from "@/layout/index";
+import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import * as util from "@/util/util";
 import { cn, makeIconClass } from "@/util/util";
+import { flip, shift } from "@floating-ui/react";
 import * as jotai from "jotai";
 import * as React from "react";
 import { BlockEnv } from "./blockenv";
@@ -183,6 +186,140 @@ const EphemeralModeSwitcher = React.memo(({ nodeModel }: { nodeModel: NodeModel 
 });
 EphemeralModeSwitcher.displayName = "EphemeralModeSwitcher";
 
+type WorkbenchSettingSliderProps = {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    deferPointerCommit?: boolean;
+    onChange: (value: number) => void;
+};
+
+const WorkbenchSettingSlider = React.memo(
+    ({ label, value, min, max, step, deferPointerCommit = false, onChange }: WorkbenchSettingSliderProps) => {
+        const [draftValue, setDraftValue] = React.useState(value);
+        const pointerActiveRef = React.useRef(false);
+
+        React.useEffect(() => {
+            if (!pointerActiveRef.current) {
+                setDraftValue(value);
+            }
+        }, [value]);
+
+        const commitPointerValue = (element: HTMLInputElement) => {
+            if (!deferPointerCommit || !pointerActiveRef.current) {
+                return;
+            }
+            pointerActiveRef.current = false;
+            onChange(Number(element.value));
+        };
+
+        return (
+            <label className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-[11px] text-secondary">
+                <span>{label}</span>
+                <input
+                    aria-label={label}
+                    className="ephemeral-workbench-setting-slider min-w-0 cursor-pointer"
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={draftValue}
+                    onPointerDown={(event) => {
+                        event.stopPropagation();
+                        if (deferPointerCommit) {
+                            pointerActiveRef.current = true;
+                            event.currentTarget.setPointerCapture?.(event.pointerId);
+                        }
+                    }}
+                    onPointerUp={(event) => commitPointerValue(event.currentTarget)}
+                    onPointerCancel={() => {
+                        pointerActiveRef.current = false;
+                        setDraftValue(value);
+                    }}
+                    onBlur={(event) => commitPointerValue(event.currentTarget)}
+                    onChange={(event) => {
+                        const nextValue = Number(event.target.value);
+                        setDraftValue(nextValue);
+                        if (!deferPointerCommit || !pointerActiveRef.current) {
+                            onChange(nextValue);
+                        }
+                    }}
+                />
+                <span className="text-right tabular-nums text-primary">{Math.round(draftValue * 100)}%</span>
+            </label>
+        );
+    }
+);
+WorkbenchSettingSlider.displayName = "WorkbenchSettingSlider";
+
+type WorkbenchSettingKey = "fileworkspace:opacity" | "fileworkspace:width" | "fileworkspace:height";
+
+const WorkbenchAppearanceSettings = React.memo(() => {
+    const blockEnv = useWaveEnv<BlockEnv>();
+    const opacity = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:opacity")) ?? 0.9;
+    const panelWidth = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:width")) ?? 1;
+    const panelHeight = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:height")) ?? 0.78;
+
+    React.useEffect(() => {
+        getLayoutModelForStaticTab()?.updateTree(false);
+    }, [panelWidth, panelHeight]);
+
+    const setWorkbenchSetting = (key: WorkbenchSettingKey, value: number) => {
+        const settings: SettingsType = { [key]: value };
+        util.fireAndForget(() => blockEnv.rpc.SetConfigCommand(TabRpcClient, settings));
+    };
+
+    return (
+        <Popover placement="bottom-end" middleware={[flip({ padding: 8 }), shift({ padding: 8 })]}>
+            <PopoverButton
+                className="ghost grey !flex !h-6 !w-6 !items-center !justify-center !p-0 cursor-pointer"
+                title="Workbench appearance"
+                aria-label="Workbench appearance"
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                <i className="fa-sharp fa-solid fa-sliders" />
+            </PopoverButton>
+            <PopoverContent
+                className="ephemeral-workbench-settings-popover"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="mb-3 text-[11px] font-semibold text-primary">Workbench appearance</div>
+                <div className="flex flex-col gap-3">
+                    <WorkbenchSettingSlider
+                        label="Opacity"
+                        value={opacity}
+                        min={0.2}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => setWorkbenchSetting("fileworkspace:opacity", value)}
+                    />
+                    <WorkbenchSettingSlider
+                        label="Width"
+                        value={panelWidth}
+                        min={0.4}
+                        max={1}
+                        step={0.05}
+                        deferPointerCommit={true}
+                        onChange={(value) => setWorkbenchSetting("fileworkspace:width", value)}
+                    />
+                    <WorkbenchSettingSlider
+                        label="Height"
+                        value={panelHeight}
+                        min={0.3}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => setWorkbenchSetting("fileworkspace:height", value)}
+                    />
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+});
+WorkbenchAppearanceSettings.displayName = "WorkbenchAppearanceSettings";
+
 type HeaderEndIconsProps = {
     viewModel: ViewModel;
     nodeModel: NodeModel;
@@ -236,6 +373,10 @@ const HeaderEndIcons = React.memo(({ viewModel, nodeModel, blockId }: HeaderEndI
         endIconsElem.push(<IconButton key="split-horizontal" decl={splitHorizontalDecl} />);
         endIconsElem.push(<IconButton key="split-vertical" decl={splitVerticalDecl} />);
     }
+    if (ephemeralSession) {
+        endIconsElem.push(<EphemeralModeSwitcher key="workbench-modes" nodeModel={nodeModel} />);
+        endIconsElem.push(<WorkbenchAppearanceSettings key="workbench-appearance" />);
+    }
     const settingsDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "cog",
@@ -243,28 +384,30 @@ const HeaderEndIcons = React.memo(({ viewModel, nodeModel, blockId }: HeaderEndI
         click: (e) => handleHeaderContextMenu(e, blockId, viewModel, nodeModel, blockEnv),
     };
     endIconsElem.push(<IconButton key="settings" decl={settingsDecl} className="block-frame-settings" />);
-    if (ephemeral && !ephemeralSession) {
-        const addToLayoutDecl: IconButtonDecl = {
-            elemtype: "iconbutton",
-            icon: "circle-plus",
-            title: "Add to Layout",
-            click: () => {
-                nodeModel.addEphemeralNodeToLayout();
-            },
-        };
-        endIconsElem.push(<IconButton key="add-to-layout" decl={addToLayoutDecl} />);
-    } else {
-        endIconsElem.push(
-            <OptMagnifyButton
-                key="unmagnify"
-                magnified={magnified}
-                toggleMagnify={() => {
-                    nodeModel.toggleMagnify();
-                    setTimeout(() => refocusNode(blockId), 50);
-                }}
-                disabled={magnifyDisabled}
-            />
-        );
+    if (!ephemeralSession) {
+        if (ephemeral) {
+            const addToLayoutDecl: IconButtonDecl = {
+                elemtype: "iconbutton",
+                icon: "circle-plus",
+                title: "Add to Layout",
+                click: () => {
+                    nodeModel.addEphemeralNodeToLayout();
+                },
+            };
+            endIconsElem.push(<IconButton key="add-to-layout" decl={addToLayoutDecl} />);
+        } else {
+            endIconsElem.push(
+                <OptMagnifyButton
+                    key="unmagnify"
+                    magnified={magnified}
+                    toggleMagnify={() => {
+                        nodeModel.toggleMagnify();
+                        setTimeout(() => refocusNode(blockId), 50);
+                    }}
+                    disabled={magnifyDisabled}
+                />
+            );
+        }
     }
 
     const closeDecl: IconButtonDecl = {
@@ -335,7 +478,6 @@ const BlockFrame_Header = ({
                     </div>
                 </>
             )}
-            {ephemeralSession && <EphemeralModeSwitcher nodeModel={nodeModel} />}
             {manageConnection && (
                 <ConnectionButton
                     ref={connBtnRef}

@@ -1,9 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Popover, PopoverButton, PopoverContent } from "@/app/element/popover";
 import { PreviewView } from "@/app/view/preview/preview";
-import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
 import { memo, useEffect, useMemo, useRef } from "react";
@@ -231,82 +229,6 @@ const AddRootForm = memo(({ model }: { model: FileWorkspaceViewModel }) => {
 });
 AddRootForm.displayName = "AddRootForm";
 
-type WorkspaceSettingSliderProps = {
-    label: string;
-    value: number;
-    min: number;
-    max: number;
-    step: number;
-    onChange: (value: number) => void;
-};
-
-const WorkspaceSettingSlider = memo(({ label, value, min, max, step, onChange }: WorkspaceSettingSliderProps) => {
-    return (
-        <label className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-[11px] text-secondary">
-            <span>{label}</span>
-            <input
-                aria-label={label}
-                className="fileworkspace-setting-slider min-w-0 cursor-pointer"
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(event) => onChange(Number(event.target.value))}
-            />
-            <span className="text-right tabular-nums text-primary">{Math.round(value * 100)}%</span>
-        </label>
-    );
-});
-WorkspaceSettingSlider.displayName = "WorkspaceSettingSlider";
-
-const FileWorkspaceSettings = memo(({ model }: { model: FileWorkspaceViewModel }) => {
-    const opacity = useAtomValue(model.opacityAtom) ?? 0.9;
-    const panelWidth = useAtomValue(model.panelWidthAtom) ?? 1;
-    const panelHeight = useAtomValue(model.panelHeightAtom) ?? 0.78;
-
-    return (
-        <Popover placement="bottom-end">
-            <PopoverButton
-                className="ghost grey !flex !h-6 !w-6 !items-center !justify-center !p-0 cursor-pointer"
-                title="File workspace appearance"
-            >
-                <i className="fa-sharp fa-solid fa-sliders" />
-            </PopoverButton>
-            <PopoverContent className="fileworkspace-settings-popover">
-                <div className="mb-3 text-[11px] font-semibold text-primary">Panel appearance</div>
-                <div className="flex flex-col gap-3">
-                    <WorkspaceSettingSlider
-                        label="Opacity"
-                        value={opacity}
-                        min={0.2}
-                        max={1}
-                        step={0.05}
-                        onChange={(value) => fireAndForget(() => model.setOpacity(value))}
-                    />
-                    <WorkspaceSettingSlider
-                        label="Width"
-                        value={panelWidth}
-                        min={0.4}
-                        max={1}
-                        step={0.05}
-                        onChange={(value) => fireAndForget(() => model.setPanelWidth(value))}
-                    />
-                    <WorkspaceSettingSlider
-                        label="Height"
-                        value={panelHeight}
-                        min={0.3}
-                        max={1}
-                        step={0.05}
-                        onChange={(value) => fireAndForget(() => model.setPanelHeight(value))}
-                    />
-                </div>
-            </PopoverContent>
-        </Popover>
-    );
-});
-FileWorkspaceSettings.displayName = "FileWorkspaceSettings";
-
 const ExplorerPane = memo(({ model }: { model: FileWorkspaceViewModel }) => {
     const roots = useAtomValue(model.activeRootsAtom);
     const connection = useAtomValue(model.connectionAtom);
@@ -333,7 +255,6 @@ const ExplorerPane = memo(({ model }: { model: FileWorkspaceViewModel }) => {
                 >
                     <i className="fa-sharp fa-solid fa-folder-plus" />
                 </button>
-                <FileWorkspaceSettings model={model} />
             </div>
             {addRootOpen && <AddRootForm model={model} />}
             <div className="min-h-0 flex-1 overflow-auto">
@@ -521,8 +442,6 @@ function FileWorkspaceView({ blockId, blockRef, model }: ViewComponentProps<File
     const roots = useAtomValue(model.activeRootsAtom);
     const explorerWidth = useAtomValue(model.explorerWidthAtom);
     const explorerLayoutVersion = useAtomValue(model.explorerLayoutVersionAtom);
-    const panelWidth = useAtomValue(model.panelWidthAtom);
-    const panelHeight = useAtomValue(model.panelHeightAtom);
     const rootsKey = useMemo(() => roots.map((root) => root.id).join(","), [roots]);
 
     useEffect(() => {
@@ -532,10 +451,6 @@ function FileWorkspaceView({ blockId, blockRef, model }: ViewComponentProps<File
             }
         });
     }, [connection, rootsKey]);
-
-    useEffect(() => {
-        getLayoutModelForStaticTab()?.updateTree(false);
-    }, [panelWidth, panelHeight]);
 
     return (
         <div

@@ -26,18 +26,6 @@
     }
 }
 
-.fileworkspace-setting-slider {
-    accent-color: var(--accent-color);
-}
-
-.fileworkspace-settings-popover {
-    display: block;
-    min-width: 250px;
-    min-height: 0;
-    padding: 12px;
-    background: var(--block-bg-color, #212121);
-}
-
 .fileworkspace-tabs {
     scrollbar-width: thin;
     scrollbar-color: rgb(from var(--main-text-color) r g b / 20%) transparent;

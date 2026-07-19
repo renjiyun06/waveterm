@@ -15,6 +15,8 @@ export type BlockEnv = WaveEnvSubset<{
         | "app:showoverlayblocknums"
         | "term:showsplitbuttons"
         | "fileworkspace:opacity"
+        | "fileworkspace:width"
+        | "fileworkspace:height"
         | "window:magnifiedblockblurprimarypx"
         | "window:magnifiedblockopacity"
     >;
@@ -32,6 +34,7 @@ export type BlockEnv = WaveEnvSubset<{
         ConnDisconnectCommand: WaveEnv["rpc"]["ConnDisconnectCommand"];
         ConnConnectCommand: WaveEnv["rpc"]["ConnConnectCommand"];
         SetConnectionsConfigCommand: WaveEnv["rpc"]["SetConnectionsConfigCommand"];
+        SetConfigCommand: WaveEnv["rpc"]["SetConfigCommand"];
         DismissWshFailCommand: WaveEnv["rpc"]["DismissWshFailCommand"];
     };
     wos: WaveEnv["wos"];

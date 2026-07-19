@@ -19,6 +19,7 @@ import {
     shFrameNavHandler,
     shNavHandler,
 } from "./emain-util";
+import { blockExternalWebviewNavigation, isAllowedWebviewNavigationUrl } from "./emain-webview-navigation";
 import { ElectronWshClient } from "./emain-wsh";
 
 function handleWindowsMenuAccelerators(
@@ -319,8 +320,21 @@ export async function getOrCreateWebViewForTab(waveWindowId: string, tabId: stri
             if (wc == null || wc.isDestroyed() || tabView.webContents == null || tabView.webContents.isDestroyed()) {
                 return { action: "deny" };
             }
+            if (!isAllowedWebviewNavigationUrl(details.url)) {
+                console.warn("blocked external webview window-open", details.url);
+                return { action: "deny" };
+            }
             tabView.webContents.send("webview-new-window", wc.id, details);
             return { action: "deny" };
+        });
+        wc.on("will-navigate", (navEvent, url) => {
+            blockExternalWebviewNavigation(navEvent, url, "will-navigate");
+        });
+        wc.on("will-frame-navigate", (navEvent) => {
+            blockExternalWebviewNavigation(navEvent, navEvent.url, "will-frame-navigate");
+        });
+        wc.on("will-redirect", (navEvent, url) => {
+            blockExternalWebviewNavigation(navEvent, url, "will-redirect");
         });
     });
     tabView.webContents.on("before-input-event", (e, input) => {
