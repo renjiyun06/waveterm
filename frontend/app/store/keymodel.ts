@@ -21,6 +21,7 @@ import {
     WOS,
 } from "@/app/store/global";
 import { getActiveTabModel } from "@/app/store/tab-model";
+import { WebViewZoomKeyDescriptions } from "@/app/view/webview/webview-zoom";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import type { EphemeralSessionMode, LayoutModel } from "@/layout/index";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
@@ -41,7 +42,7 @@ const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
 let fileWorkspaceKeybinding = "";
 let fileWorkspaceKeybindingUnsubscribe: () => void;
-const ephemeralModeCreationPromises = new WeakMap<LayoutModel, Map<EphemeralSessionMode, Promise<string>>>();
+const ephemeralModeCreationPromises = new WeakMap<LayoutModel, Map<string, Promise<string>>>();
 
 // track current chord state and timeout (for resetting)
 let activeChord: string | null = null;
@@ -505,6 +506,42 @@ async function switchEphemeralWorkbenchMode(mode: EphemeralSessionMode): Promise
     }
 }
 
+async function createEphemeralWorkbenchTab(mode: EphemeralSessionMode): Promise<void> {
+    if (mode === "files") {
+        return;
+    }
+
+    const layoutModel = getLayoutModelForStaticTab();
+    layoutModel.requestEphemeralSessionMode(mode);
+
+    let creationPromises = ephemeralModeCreationPromises.get(layoutModel);
+    if (!creationPromises) {
+        creationPromises = new Map();
+        ephemeralModeCreationPromises.set(layoutModel, creationPromises);
+    }
+
+    const creationKey = `tab:${mode}`;
+    let creationPromise = creationPromises.get(creationKey);
+    if (!creationPromise) {
+        creationPromise = ObjectService.CreateBlock(getEphemeralModeBlockDef(layoutModel, mode), {
+            termsize: { rows: 25, cols: 80 },
+        });
+        creationPromises.set(creationKey, creationPromise);
+    }
+
+    try {
+        const blockId = await creationPromise;
+        const sessionNode = layoutModel.newEphemeralSessionNode(blockId, mode, "top", blockDefView(mode), false);
+        if (layoutModel.isEphemeralSessionModeRequested(mode)) {
+            layoutModel.showEphemeralSession(mode, sessionNode.id);
+        }
+    } finally {
+        if (creationPromises.get(creationKey) === creationPromise) {
+            creationPromises.delete(creationKey);
+        }
+    }
+}
+
 function blockDefView(mode: EphemeralSessionMode): string {
     if (mode === "files") {
         return "fileworkspace";
@@ -563,7 +600,7 @@ function registerGlobalWebviewKeys() {
     if (fileWorkspaceKeybinding) {
         allKeys.push(fileWorkspaceKeybinding);
     }
-    allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
+    allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o", ...WebViewZoomKeyDescriptions);
     getApi().registerGlobalWebviewKeys(Array.from(new Set(allKeys)));
 }
 
@@ -960,6 +997,7 @@ function getAllGlobalKeyBindings(): string[] {
 
 export {
     appHandleKeyDown,
+    createEphemeralWorkbenchTab,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
     getSimpleControlShiftAtom,

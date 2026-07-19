@@ -59,7 +59,7 @@ You can use \`wsh view [path]\` from any Wave terminal window to open a preview 
 
 Press <Kbd k="Cmd:Shift:e" /> to slide a temporary workbench down over the current terminal layout. Press the shortcut again to hide it. Change the shortcut with `app:fileworkspacekeybinding` in `settings.json`; changes apply immediately.
 
-Use the mode switcher at the right side of the workbench header to choose Files, Terminal, or Browser. Each mode has its own live session: switching modes or hiding the workbench keeps file tabs and drafts, the terminal process and scrollback, and browser navigation intact. These transient sessions reset when Wave restarts. Links that request a new browser window are loaded in the same workbench browser instead of creating another block. External application protocols are blocked so websites cannot repeatedly launch native-app or app-store prompts.
+Use the mode switcher at the right side of the workbench header to choose Files, Terminal, or Browser. Terminal and Browser include a tab bar: use **+** to create independent terminal processes or browser sessions, select a tab to switch, and close tabs when more than one is open. Switching tabs or modes and hiding the workbench keeps file tabs and drafts, terminal processes and scrollback, and browser navigation intact. These transient sessions reset when Wave restarts. In a browser tab, use `Ctrl`+`+` and `Ctrl`+`-` to change that tab's page zoom, or `Ctrl`+`0` to reset it. Links that request a new browser window are loaded in the current workbench browser tab instead of creating another block. External application protocols are blocked so websites cannot repeatedly launch native-app or app-store prompts.
 
 Files uses the focused block's connection when it is first opened and lets you switch connections from its header.
 
@@ -67,7 +67,7 @@ Folders added to the explorer are stored with the current Wave workspace and can
 
 Git repositories show dirty folders and files, while the editor gutter marks added, modified, and deleted lines. Unsaved editor changes are shown separately from Git status.
 
-Use the sliders button beside the mode switcher in the workbench header to adjust the workbench opacity, width, and height. The corresponding settings are `fileworkspace:opacity`, `fileworkspace:width`, and `fileworkspace:height`; they apply to the complete Files, Terminal, and Browser surfaces and are independent from magnified block settings. Width changes are committed when a pointer drag finishes so the settings popover stays stable while its slider is being adjusted.
+Use the sliders button beside the mode switcher in the workbench header to adjust the workbench opacity, width, and height. The corresponding settings are `fileworkspace:opacity`, `fileworkspace:width`, and `fileworkspace:height`; they apply to the complete Files, Terminal, and Browser surfaces and are independent from magnified block settings. The settings popover stays fixed at its opening position while sliders update the workbench live.
 
 #### Directory
 

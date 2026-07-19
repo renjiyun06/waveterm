@@ -192,66 +192,38 @@ type WorkbenchSettingSliderProps = {
     min: number;
     max: number;
     step: number;
-    deferPointerCommit?: boolean;
     onChange: (value: number) => void;
 };
 
-const WorkbenchSettingSlider = React.memo(
-    ({ label, value, min, max, step, deferPointerCommit = false, onChange }: WorkbenchSettingSliderProps) => {
-        const [draftValue, setDraftValue] = React.useState(value);
-        const pointerActiveRef = React.useRef(false);
+const WorkbenchSettingSlider = React.memo(({ label, value, min, max, step, onChange }: WorkbenchSettingSliderProps) => {
+    const [draftValue, setDraftValue] = React.useState(value);
 
-        React.useEffect(() => {
-            if (!pointerActiveRef.current) {
-                setDraftValue(value);
-            }
-        }, [value]);
+    React.useEffect(() => {
+        setDraftValue(value);
+    }, [value]);
 
-        const commitPointerValue = (element: HTMLInputElement) => {
-            if (!deferPointerCommit || !pointerActiveRef.current) {
-                return;
-            }
-            pointerActiveRef.current = false;
-            onChange(Number(element.value));
-        };
-
-        return (
-            <label className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-[11px] text-secondary">
-                <span>{label}</span>
-                <input
-                    aria-label={label}
-                    className="ephemeral-workbench-setting-slider min-w-0 cursor-pointer"
-                    type="range"
-                    min={min}
-                    max={max}
-                    step={step}
-                    value={draftValue}
-                    onPointerDown={(event) => {
-                        event.stopPropagation();
-                        if (deferPointerCommit) {
-                            pointerActiveRef.current = true;
-                            event.currentTarget.setPointerCapture?.(event.pointerId);
-                        }
-                    }}
-                    onPointerUp={(event) => commitPointerValue(event.currentTarget)}
-                    onPointerCancel={() => {
-                        pointerActiveRef.current = false;
-                        setDraftValue(value);
-                    }}
-                    onBlur={(event) => commitPointerValue(event.currentTarget)}
-                    onChange={(event) => {
-                        const nextValue = Number(event.target.value);
-                        setDraftValue(nextValue);
-                        if (!deferPointerCommit || !pointerActiveRef.current) {
-                            onChange(nextValue);
-                        }
-                    }}
-                />
-                <span className="text-right tabular-nums text-primary">{Math.round(draftValue * 100)}%</span>
-            </label>
-        );
-    }
-);
+    return (
+        <label className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-[11px] text-secondary">
+            <span>{label}</span>
+            <input
+                aria-label={label}
+                className="ephemeral-workbench-setting-slider min-w-0 cursor-pointer"
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={draftValue}
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    setDraftValue(nextValue);
+                    onChange(nextValue);
+                }}
+            />
+            <span className="text-right tabular-nums text-primary">{Math.round(draftValue * 100)}%</span>
+        </label>
+    );
+});
 WorkbenchSettingSlider.displayName = "WorkbenchSettingSlider";
 
 type WorkbenchSettingKey = "fileworkspace:opacity" | "fileworkspace:width" | "fileworkspace:height";
@@ -261,6 +233,7 @@ const WorkbenchAppearanceSettings = React.memo(() => {
     const opacity = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:opacity")) ?? 0.9;
     const panelWidth = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:width")) ?? 1;
     const panelHeight = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("fileworkspace:height")) ?? 0.78;
+    const popoverMiddleware = React.useMemo(() => [flip({ padding: 8 }), shift({ padding: 8 })], []);
 
     React.useEffect(() => {
         getLayoutModelForStaticTab()?.updateTree(false);
@@ -272,7 +245,7 @@ const WorkbenchAppearanceSettings = React.memo(() => {
     };
 
     return (
-        <Popover placement="bottom-end" middleware={[flip({ padding: 8 }), shift({ padding: 8 })]}>
+        <Popover placement="bottom-end" middleware={popoverMiddleware} lockPosition={true}>
             <PopoverButton
                 className="ghost grey !flex !h-6 !w-6 !items-center !justify-center !p-0 cursor-pointer"
                 title="Workbench appearance"
@@ -302,7 +275,6 @@ const WorkbenchAppearanceSettings = React.memo(() => {
                         min={0.4}
                         max={1}
                         step={0.05}
-                        deferPointerCommit={true}
                         onChange={(value) => setWorkbenchSetting("fileworkspace:width", value)}
                     />
                     <WorkbenchSettingSlider

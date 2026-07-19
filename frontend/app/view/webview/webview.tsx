@@ -22,6 +22,7 @@ import clsx from "clsx";
 import type { WebviewTag } from "electron";
 import { Atom, PrimitiveAtom, atom, useAtomValue, useSetAtom } from "jotai";
 import { Fragment, createRef, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getAdjacentWebViewZoomFactor, getWebViewZoomAction } from "./webview-zoom";
 import "./webview.scss";
 import type { WebViewEnv } from "./webviewenv";
 
@@ -562,6 +563,16 @@ export class WebViewModel implements ViewModel {
     }
 
     keyDownHandler(e: WaveKeyboardEvent): boolean {
+        const zoomAction = getWebViewZoomAction(e);
+        if (zoomAction) {
+            if (zoomAction === "reset") {
+                this.setZoomFactor(null);
+            } else {
+                const currentFactor = this.webviewRef.current?.getZoomFactor() || 1;
+                this.setZoomFactor(getAdjacentWebViewZoomFactor(currentFactor, zoomAction));
+            }
+            return true;
+        }
         if (checkKeyPressed(e, "Cmd:l")) {
             this.urlInputRef?.current?.focus();
             this.urlInputRef?.current?.select();

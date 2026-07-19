@@ -24,6 +24,7 @@ import {
     memo,
     ReactElement,
     ReactNode,
+    useMemo,
     useState,
 } from "react";
 
@@ -36,6 +37,7 @@ interface PopoverProps {
     offset?: OffsetOptions;
     onDismiss?: () => void;
     middleware?: Middleware[];
+    lockPosition?: boolean;
 }
 
 const isPopoverButton = (
@@ -52,7 +54,18 @@ const isPopoverContent = (
 
 const Popover = memo(
     forwardRef<HTMLDivElement, PopoverProps>(
-        ({ children, className, placement = "bottom-start", offset = 3, onDismiss, middleware }, ref) => {
+        (
+            {
+                children,
+                className,
+                placement = "bottom-start",
+                offset = 3,
+                onDismiss,
+                middleware,
+                lockPosition = false,
+            },
+            ref
+        ) => {
             const [isOpen, setIsOpen] = useState(false);
 
             const handleOpenChange = (open: boolean) => {
@@ -62,19 +75,27 @@ const Popover = memo(
                 }
             };
 
-            if (offset === undefined) {
-                offset = 3;
-            }
-
-            middleware ??= [];
-            middleware.push(offsetMiddleware(offset));
+            const floatingMiddleware = useMemo(
+                () => [...(middleware ?? []), offsetMiddleware(offset)],
+                [middleware, offset]
+            );
+            const whileElementsMounted = useMemo(() => {
+                if (!lockPosition) {
+                    return autoUpdate;
+                }
+                return (_reference: Element, _floating: HTMLElement, update: () => void) => {
+                    update();
+                    return () => {};
+                };
+            }, [lockPosition]);
 
             const { refs, floatingStyles, context } = useFloating({
                 placement,
                 open: isOpen,
                 onOpenChange: handleOpenChange,
-                middleware: middleware,
-                whileElementsMounted: autoUpdate,
+                strategy: lockPosition ? "fixed" : "absolute",
+                middleware: floatingMiddleware,
+                whileElementsMounted,
             });
 
             const click = useClick(context);
