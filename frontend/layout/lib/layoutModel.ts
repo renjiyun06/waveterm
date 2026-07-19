@@ -72,6 +72,10 @@ interface ResizeContext {
 const DefaultGapSizePx = 3;
 const MinNodeSizePx = 40;
 const DefaultAnimationTimeS = 0.15;
+const FileWorkspaceDefaultWidth = 1;
+const FileWorkspaceDefaultHeight = 0.78;
+const FileWorkspaceMinWidth = 0.4;
+const FileWorkspaceMinHeight = 0.3;
 
 export class LayoutModel {
     /**
@@ -217,6 +221,8 @@ export class LayoutModel {
      */
     lastEphemeralNodeId: string;
     magnifiedNodeSizeAtom: Atom<number>;
+    fileWorkspaceWidthAtom: Atom<number>;
+    fileWorkspaceHeightAtom: Atom<number>;
 
     /**
      * The size of the resize handles, in CSS pixels.
@@ -326,6 +332,8 @@ export class LayoutModel {
 
         this.ephemeralNode = atom();
         this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+        this.fileWorkspaceWidthAtom = getSettingsKeyAtom("fileworkspace:width");
+        this.fileWorkspaceHeightAtom = getSettingsKeyAtom("fileworkspace:height");
 
         this.magnifiedNodeIdAtom = atom((get) => {
             const treeState = get(this.localTreeStateAtom);
@@ -823,9 +831,8 @@ export class LayoutModel {
             return resizeAction?.resizeOperations.find((op) => op.nodeId === node.id)?.size ?? node.size;
         }
 
-        const additionalProps: LayoutNodeAdditionalProps = node.id in additionalPropsMap
-            ? additionalPropsMap[node.id]
-            : { treeKey: "0" };
+        const additionalProps: LayoutNodeAdditionalProps =
+            node.id in additionalPropsMap ? additionalPropsMap[node.id] : { treeKey: "0" };
 
         const nodeRect: Dimensions = node.id === this.treeState.rootNode.id ? boundingRect : additionalProps.rect;
         const nodeIsRow = node.flexDirection === FlexDirection.Row;
@@ -1318,7 +1325,7 @@ export class LayoutModel {
         await this.closeNode(this.focusedNodeId);
     }
 
-    newEphemeralNode(blockId: string, position: TabLayoutData["ephemeralPosition"] = "center") {
+    newEphemeralNode(blockId: string, position: TabLayoutData["ephemeralPosition"] = "center", view?: string) {
         if (this.getter(this.ephemeralNode)) {
             this.closeNode(this.getter(this.ephemeralNode).id);
         }
@@ -1326,6 +1333,7 @@ export class LayoutModel {
         const ephemeralNode = newLayoutNode(undefined, undefined, undefined, {
             blockId,
             ephemeralPosition: position,
+            ephemeralView: view,
         });
         this.setter(this.ephemeralNode, ephemeralNode);
 
@@ -1366,11 +1374,21 @@ export class LayoutModel {
         const position = node.data.ephemeralPosition ?? "center";
         let rect: Dimensions;
         if (position == "top" || position == "bottom") {
-            const height = boundingRect.height * 0.78;
+            const isFileWorkspace = node.data.ephemeralView == "fileworkspace";
+            const widthPct = isFileWorkspace
+                ? (boundNumber(this.getter(this.fileWorkspaceWidthAtom), FileWorkspaceMinWidth, 1) ??
+                  FileWorkspaceDefaultWidth)
+                : 1;
+            const heightPct = isFileWorkspace
+                ? (boundNumber(this.getter(this.fileWorkspaceHeightAtom), FileWorkspaceMinHeight, 1) ??
+                  FileWorkspaceDefaultHeight)
+                : FileWorkspaceDefaultHeight;
+            const width = boundingRect.width * widthPct;
+            const height = boundingRect.height * heightPct;
             rect = {
                 top: position == "top" ? 0 : boundingRect.height - height,
-                left: 0,
-                width: boundingRect.width,
+                left: (boundingRect.width - width) / 2,
+                width,
                 height,
             };
         } else {

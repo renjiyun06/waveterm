@@ -59,9 +59,11 @@ You can use \`wsh view [path]\` from any Wave terminal window to open a preview 
 
 Press <Kbd k="Cmd:Shift:e" /> to slide a temporary file workspace down over the current terminal layout. Press the shortcut again to close it. Change the shortcut with `app:fileworkspacekeybinding` in `settings.json`; changes apply immediately. The panel uses the focused block's connection and lets you switch connections from its header.
 
-Folders added to the explorer are stored with the current Wave workspace and can be removed without deleting them from disk. Each connection has its own folder list. Git repositories show dirty folders and files, while the editor gutter marks added, modified, and deleted lines. Unsaved editor changes are shown separately from Git status.
+Folders added to the explorer are stored with the current Wave workspace and can be removed without deleting them from disk. Each connection has its own folder list. Expanded folders and the resizable explorer width are remembered per workspace and connection. The editor supports multiple file tabs and warns before discarding unsaved tab contents.
 
-The panel uses the `window:magnifiedblockopacity` setting for transparency.
+Git repositories show dirty folders and files, while the editor gutter marks added, modified, and deleted lines. Unsaved editor changes are shown separately from Git status.
+
+Use the sliders button in the explorer header to adjust the panel opacity, width, and height. The corresponding settings are `fileworkspace:opacity`, `fileworkspace:width`, and `fileworkspace:height`; they are independent from magnified block settings.
 
 #### Directory
 

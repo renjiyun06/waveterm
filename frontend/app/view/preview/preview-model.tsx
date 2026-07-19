@@ -681,8 +681,13 @@ export class PreviewModel implements ViewModel {
     }
 
     async handleFileRevert() {
-        const fileContent = await globalStore.get(this.fileContent);
-        this.monacoRef.current?.setValue(fileContent);
+        let savedContent = globalStore.get(this.fileContentSaved);
+        if (savedContent == null) {
+            const fullFile = await globalStore.get(this.fullFile);
+            savedContent = base64ToString(fullFile?.data64);
+            globalStore.set(this.fileContentSaved, savedContent);
+        }
+        this.monacoRef.current?.setValue(savedContent);
         globalStore.set(this.newFileContent, null);
     }
 

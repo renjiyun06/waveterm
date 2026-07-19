@@ -178,6 +178,12 @@ type FileWorkspaceRoot struct {
 	Name       string `json:"name,omitempty"`
 }
 
+type FileWorkspaceState struct {
+	Connection    string   `json:"connection"`
+	Expanded      []string `json:"expanded"`
+	ExplorerWidth float64  `json:"explorerwidth,omitempty"`
+}
+
 type Workspace struct {
 	OID         string      `json:"oid"`
 	Version     int         `json:"version"`

@@ -411,7 +411,7 @@ async function createBlock(blockDef: BlockDef, magnified = false, ephemeral = fa
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
     if (ephemeral) {
         const position = blockDef.meta?.view == "fileworkspace" ? "top" : "center";
-        layoutModel.newEphemeralNode(blockId, position);
+        layoutModel.newEphemeralNode(blockId, position, blockDef.meta?.view);
         return blockId;
     }
     const insertNodeAction: LayoutTreeInsertNodeAction = {
@@ -686,7 +686,6 @@ export {
     getBlockComponentModel,
     getBlockMetaKeyAtom,
     getBlockTermDurableAtom,
-    getTabMetaKeyAtom,
     getConfigBackgroundAtom,
     getConnConfigKeyAtom,
     getConnStatusAtom,
@@ -698,6 +697,7 @@ export {
     getOverrideConfigAtom,
     getSettingsKeyAtom,
     getSettingsPrefixAtom,
+    getTabMetaKeyAtom,
     getUserName,
     globalPrimaryTabStartup,
     globalStore,

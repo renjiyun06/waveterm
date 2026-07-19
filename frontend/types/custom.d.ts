@@ -51,6 +51,7 @@ declare global {
     type TabLayoutData = {
         blockId: string;
         ephemeralPosition?: "center" | "top" | "bottom";
+        ephemeralView?: string;
     };
 
     type GlobalInitOptions = {

@@ -20,6 +20,11 @@ const (
 	ConfigKey_AppFocusFollowsCursor          = "app:focusfollowscursor"
 	ConfigKey_AppTabBar                      = "app:tabbar"
 
+	ConfigKey_FileWorkspaceClear             = "fileworkspace:*"
+	ConfigKey_FileWorkspaceOpacity           = "fileworkspace:opacity"
+	ConfigKey_FileWorkspaceWidth             = "fileworkspace:width"
+	ConfigKey_FileWorkspaceHeight            = "fileworkspace:height"
+
 	ConfigKey_FeatureWaveAppBuilder          = "feature:waveappbuilder"
 
 	ConfigKey_AiClear                        = "ai:*"

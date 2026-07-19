@@ -1012,6 +1012,13 @@ declare global {
         name?: string;
     };
 
+    // waveobj.FileWorkspaceState
+    type FileWorkspaceState = {
+        connection: string;
+        expanded: string[];
+        explorerwidth?: number;
+    };
+
     // wshrpc.FocusedBlockData
     type FocusedBlockData = {
         blockid: string;
@@ -1222,6 +1229,7 @@ declare global {
         "layout:vtabbarwidth"?: number;
         "layout:widgetsvisible"?: boolean;
         "fileworkspace:roots"?: FileWorkspaceRoot[];
+        "fileworkspace:states"?: FileWorkspaceState[];
         "waveai:panelopen"?: boolean;
         "waveai:panelwidth"?: number;
         "waveai:model"?: string;
@@ -1446,6 +1454,10 @@ declare global {
         "app:disablectrlshiftdisplay"?: boolean;
         "app:focusfollowscursor"?: string;
         "app:tabbar"?: string;
+        "fileworkspace:*"?: boolean;
+        "fileworkspace:opacity"?: number;
+        "fileworkspace:width"?: number;
+        "fileworkspace:height"?: number;
         "feature:waveappbuilder"?: boolean;
         "ai:*"?: boolean;
         "ai:preset"?: string;

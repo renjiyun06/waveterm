@@ -14,6 +14,7 @@ export type BlockEnv = WaveEnvSubset<{
         | "app:focusfollowscursor"
         | "app:showoverlayblocknums"
         | "term:showsplitbuttons"
+        | "fileworkspace:opacity"
         | "window:magnifiedblockblurprimarypx"
         | "window:magnifiedblockopacity"
     >;

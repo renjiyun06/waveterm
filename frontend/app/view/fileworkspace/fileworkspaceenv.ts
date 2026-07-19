@@ -36,7 +36,12 @@ export type FileWorkspaceEnv = WaveEnvSubset<{
     wos: WaveEnv["wos"];
     getBlockMetaKeyAtom: MetaKeyAtomFnType<"connection">;
     getSettingsKeyAtom: SettingsKeyAtomFnType<
-        "preview:showhiddenfiles" | "editor:fontsize" | "preview:defaultsort" | "window:magnifiedblockopacity"
+        | "preview:showhiddenfiles"
+        | "editor:fontsize"
+        | "preview:defaultsort"
+        | "fileworkspace:opacity"
+        | "fileworkspace:width"
+        | "fileworkspace:height"
     >;
     getConnStatusAtom: WaveEnv["getConnStatusAtom"];
 }>;

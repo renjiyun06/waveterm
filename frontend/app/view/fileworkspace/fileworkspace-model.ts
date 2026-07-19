@@ -12,11 +12,28 @@ import { FileWorkspaceView } from "./fileworkspace";
 import type { FileWorkspaceEnv } from "./fileworkspaceenv";
 
 const GitRefreshIntervalMs = 3000;
+const PersistStateDelayMs = 250;
+const ExplorerDefaultWidth = 28;
+const ExplorerMinWidth = 16;
+const ExplorerMaxWidth = 48;
 
 export type FileWorkspaceDirectoryState = {
     entries: FileInfo[];
     loading: boolean;
     error?: string;
+};
+
+export type FileWorkspaceTab = {
+    id: string;
+    rootId: string;
+    connection: string;
+    path: string;
+    name: string;
+    savedContent: string;
+    draftContent: string;
+    edit: boolean;
+    gitDiffHunks: GitDiffHunk[];
+    gitFileStatus: string;
 };
 
 function normalizeConnection(connection: string): string {
@@ -31,6 +48,13 @@ function getRootName(path: string): string {
     const normalized = path.replace(/[\\/]+$/, "");
     const parts = normalized.split(/[\\/]/);
     return parts[parts.length - 1] || path;
+}
+
+function clampExplorerWidth(width: number): number {
+    if (width == null || !Number.isFinite(width)) {
+        return ExplorerDefaultWidth;
+    }
+    return Math.min(ExplorerMaxWidth, Math.max(ExplorerMinWidth, width));
 }
 
 export class FileWorkspaceViewModel implements ViewModel {
@@ -49,8 +73,15 @@ export class FileWorkspaceViewModel implements ViewModel {
     activeRootsAtom: jotai.Atom<FileWorkspaceRoot[]>;
     connectionAtom: jotai.Atom<string>;
     opacityAtom: jotai.Atom<number>;
-    selectedRootIdAtom = jotai.atom<string>("");
-    selectedPathAtom = jotai.atom<string>("");
+    panelWidthAtom: jotai.Atom<number>;
+    panelHeightAtom: jotai.Atom<number>;
+    activeTabAtom: jotai.Atom<FileWorkspaceTab>;
+    selectedRootIdAtom: jotai.Atom<string>;
+    selectedPathAtom: jotai.Atom<string>;
+    tabsAtom = jotai.atom<FileWorkspaceTab[]>([]);
+    activeTabIdAtom = jotai.atom<string>("");
+    explorerWidthAtom = jotai.atom<number>(ExplorerDefaultWidth);
+    explorerLayoutVersionAtom = jotai.atom<number>(0);
     directoryStatesAtom = jotai.atom<Record<string, FileWorkspaceDirectoryState>>({});
     expandedDirectoriesAtom = jotai.atom<string[]>([]);
     gitStatusesAtom = jotai.atom<Record<string, GitStatusResponse>>({});
@@ -63,22 +94,19 @@ export class FileWorkspaceViewModel implements ViewModel {
     disposed = false;
     gitRefreshPending = false;
     gitPollTimer: ReturnType<typeof setInterval>;
+    persistStateTimer: ReturnType<typeof setTimeout>;
     diffEpoch = 0;
     activeConnection: string;
+    workspaceStates: FileWorkspaceState[] = [];
 
     constructor(initOpts: ViewModelInitType) {
         this.blockId = initOpts.blockId;
         this.env = initOpts.waveEnv;
         this.previewModel = new PreviewModel(initOpts);
-        this.previewModel.onFileSaved = () => {
-            fireAndForget(() => this.refreshGitStatuses());
-        };
 
         this.connectionAtom = jotai.atom((get) => {
             return normalizeConnection(get(this.env.getBlockMetaKeyAtom(this.blockId, "connection")));
         });
-        this.activeConnection = globalStore.get(this.connectionAtom);
-        this.opacityAtom = this.env.getSettingsKeyAtom("window:magnifiedblockopacity");
         this.rootsAtom = jotai.atom((get) => {
             const workspace = get(this.env.atoms.workspace);
             return workspace?.meta?.["fileworkspace:roots"] ?? [];
@@ -87,6 +115,28 @@ export class FileWorkspaceViewModel implements ViewModel {
             const connection = get(this.connectionAtom);
             return get(this.rootsAtom).filter((root) => normalizeConnection(root.connection) == connection);
         });
+        this.activeTabAtom = jotai.atom((get) => {
+            const activeTabId = get(this.activeTabIdAtom);
+            return get(this.tabsAtom).find((tab) => tab.id == activeTabId);
+        });
+        this.selectedRootIdAtom = jotai.atom((get) => get(this.activeTabAtom)?.rootId ?? "");
+        this.selectedPathAtom = jotai.atom((get) => get(this.activeTabAtom)?.path ?? "");
+        this.opacityAtom = this.env.getSettingsKeyAtom("fileworkspace:opacity");
+        this.panelWidthAtom = this.env.getSettingsKeyAtom("fileworkspace:width");
+        this.panelHeightAtom = this.env.getSettingsKeyAtom("fileworkspace:height");
+
+        const workspace = globalStore.get(this.env.atoms.workspace);
+        this.workspaceStates = (workspace?.meta?.["fileworkspace:states"] ?? []).map((state) => ({
+            ...state,
+            expanded: [...(state.expanded ?? [])],
+        }));
+        this.activeConnection = globalStore.get(this.connectionAtom);
+        this.restoreConnectionState(this.activeConnection);
+
+        this.previewModel.onFileSaved = () => {
+            this.captureActiveTab();
+            fireAndForget(() => this.refreshGitStatuses());
+        };
         this.gitPollTimer = setInterval(() => {
             fireAndForget(() => this.refreshGitStatuses());
         }, GitRefreshIntervalMs);
@@ -113,6 +163,14 @@ export class FileWorkspaceViewModel implements ViewModel {
         return globalStore.get(this.activeRootsAtom);
     }
 
+    getTabs(): FileWorkspaceTab[] {
+        return globalStore.get(this.tabsAtom);
+    }
+
+    getActiveTab(): FileWorkspaceTab {
+        return globalStore.get(this.activeTabAtom);
+    }
+
     setAddRootPath(path: string) {
         globalStore.set(this.addRootPathAtom, path);
         globalStore.set(this.addRootErrorAtom, "");
@@ -131,9 +189,9 @@ export class FileWorkspaceViewModel implements ViewModel {
     toggleAddRoot() {
         if (globalStore.get(this.addRootOpenAtom)) {
             this.closeAddRoot();
-        } else {
-            this.openAddRoot();
+            return;
         }
+        this.openAddRoot();
     }
 
     async persistRoots(roots: FileWorkspaceRoot[]) {
@@ -147,20 +205,152 @@ export class FileWorkspaceViewModel implements ViewModel {
         });
     }
 
-    async handleConnectionChanged(connection: string): Promise<boolean> {
-        if (connection == this.activeConnection) {
-            return true;
+    updateCachedConnectionState(connection: string, expanded?: string[], explorerWidth?: number) {
+        const normalizedConnection = normalizeConnection(connection);
+        const stateIndex = this.workspaceStates.findIndex(
+            (state) => normalizeConnection(state.connection) == normalizedConnection
+        );
+        const currentState =
+            stateIndex >= 0
+                ? this.workspaceStates[stateIndex]
+                : {
+                      connection: normalizedConnection,
+                      expanded: [],
+                      explorerwidth: ExplorerDefaultWidth,
+                  };
+        const nextState: FileWorkspaceState = {
+            ...currentState,
+            connection: normalizedConnection,
+            expanded: expanded != null ? [...expanded] : [...(currentState.expanded ?? [])],
+            explorerwidth:
+                explorerWidth != null
+                    ? clampExplorerWidth(explorerWidth)
+                    : clampExplorerWidth(currentState.explorerwidth),
+        };
+        if (stateIndex >= 0) {
+            this.workspaceStates = this.workspaceStates.map((state, index) =>
+                index == stateIndex ? nextState : state
+            );
+            return;
         }
-        if (!this.confirmDiscardUnsaved("Discard unsaved changes and switch connections?")) {
-            await this.env.rpc.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", this.blockId),
-                meta: { connection: this.activeConnection },
-            });
-            return false;
+        this.workspaceStates = [...this.workspaceStates, nextState];
+    }
+
+    schedulePersistWorkspaceStates() {
+        if (this.persistStateTimer != null) {
+            clearTimeout(this.persistStateTimer);
         }
-        this.activeConnection = connection;
-        globalStore.set(this.selectedRootIdAtom, "");
-        globalStore.set(this.selectedPathAtom, "");
+        this.persistStateTimer = setTimeout(() => {
+            this.persistStateTimer = null;
+            fireAndForget(() => this.persistWorkspaceStates());
+        }, PersistStateDelayMs);
+    }
+
+    async persistWorkspaceStates() {
+        const workspace = globalStore.get(this.env.atoms.workspace);
+        if (!workspace?.oid) {
+            return;
+        }
+        await this.env.rpc.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("workspace", workspace.oid),
+            meta: { "fileworkspace:states": this.workspaceStates },
+        });
+    }
+
+    restoreConnectionState(connection: string) {
+        const normalizedConnection = normalizeConnection(connection);
+        const state = this.workspaceStates.find((item) => normalizeConnection(item.connection) == normalizedConnection);
+        if (state != null) {
+            globalStore.set(this.expandedDirectoriesAtom, [...(state.expanded ?? [])]);
+            globalStore.set(this.explorerWidthAtom, clampExplorerWidth(state.explorerwidth));
+            globalStore.set(this.explorerLayoutVersionAtom, (version) => version + 1);
+            return;
+        }
+        const expanded = this.getRoots()
+            .filter((root) => normalizeConnection(root.connection) == normalizedConnection)
+            .map((root) => getDirectoryKey(root.id, root.path));
+        globalStore.set(this.expandedDirectoriesAtom, expanded);
+        globalStore.set(this.explorerWidthAtom, ExplorerDefaultWidth);
+        globalStore.set(this.explorerLayoutVersionAtom, (version) => version + 1);
+        this.updateCachedConnectionState(normalizedConnection, expanded, ExplorerDefaultWidth);
+        this.schedulePersistWorkspaceStates();
+    }
+
+    setExplorerWidth(width: number) {
+        const nextWidth = clampExplorerWidth(width);
+        if (Math.abs(globalStore.get(this.explorerWidthAtom) - nextWidth) < 0.1) {
+            return;
+        }
+        globalStore.set(this.explorerWidthAtom, nextWidth);
+        this.updateCachedConnectionState(this.activeConnection, undefined, nextWidth);
+        this.schedulePersistWorkspaceStates();
+    }
+
+    captureActiveTab() {
+        const activeTab = this.getActiveTab();
+        if (!activeTab) {
+            return;
+        }
+        const nextTab: FileWorkspaceTab = {
+            ...activeTab,
+            savedContent: globalStore.get(this.previewModel.fileContentSaved),
+            draftContent: globalStore.get(this.previewModel.newFileContent),
+            edit: globalStore.get(this.previewModel.editMode),
+            gitDiffHunks: globalStore.get(this.previewModel.gitDiffHunksAtom),
+            gitFileStatus: globalStore.get(this.previewModel.gitFileStatusAtom),
+        };
+        globalStore.set(
+            this.tabsAtom,
+            this.getTabs().map((tab) => (tab.id == nextTab.id ? nextTab : tab))
+        );
+    }
+
+    updateTab(tabId: string, update: Partial<FileWorkspaceTab>) {
+        globalStore.set(
+            this.tabsAtom,
+            this.getTabs().map((tab) => (tab.id == tabId ? { ...tab, ...update } : tab))
+        );
+    }
+
+    hasUnsavedTabs(): boolean {
+        this.captureActiveTab();
+        return this.getTabs().some((tab) => tab.draftContent != null);
+    }
+
+    async showTab(tab: FileWorkspaceTab) {
+        await this.env.rpc.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", this.blockId),
+            meta: {
+                connection: normalizeConnection(tab.connection),
+                file: tab.path,
+                edit: tab.edit,
+            },
+        });
+        globalStore.set(this.activeTabIdAtom, tab.id);
+        globalStore.set(this.previewModel.fileContentSaved, tab.savedContent);
+        globalStore.set(this.previewModel.newFileContent, tab.draftContent);
+        globalStore.set(this.previewModel.gitDiffHunksAtom, tab.gitDiffHunks ?? []);
+        globalStore.set(this.previewModel.gitFileStatusAtom, tab.gitFileStatus ?? "");
+        globalStore.set(this.previewModel.errorMsgAtom, null);
+        await this.refreshSelectedFileDiff();
+    }
+
+    async activateTab(tabId: string) {
+        if (globalStore.get(this.activeTabIdAtom) == tabId) {
+            return;
+        }
+        this.captureActiveTab();
+        const tab = this.getTabs().find((item) => item.id == tabId);
+        if (!tab) {
+            return;
+        }
+        await this.showTab(tab);
+    }
+
+    async clearTabs() {
+        this.diffEpoch++;
+        globalStore.set(this.tabsAtom, []);
+        globalStore.set(this.activeTabIdAtom, "");
         globalStore.set(this.previewModel.fileContentSaved, null);
         globalStore.set(this.previewModel.newFileContent, null);
         globalStore.set(this.previewModel.gitDiffHunksAtom, []);
@@ -169,6 +359,47 @@ export class FileWorkspaceViewModel implements ViewModel {
             oref: WOS.makeORef("block", this.blockId),
             meta: { file: "", edit: false },
         });
+    }
+
+    async closeTab(tabId: string) {
+        this.captureActiveTab();
+        const tabs = this.getTabs();
+        const tabIndex = tabs.findIndex((tab) => tab.id == tabId);
+        if (tabIndex < 0) {
+            return;
+        }
+        const tab = tabs[tabIndex];
+        if (tab.draftContent != null && !window.confirm(`Discard unsaved changes in ${tab.name}?`)) {
+            return;
+        }
+        const remainingTabs = tabs.filter((item) => item.id != tabId);
+        globalStore.set(this.tabsAtom, remainingTabs);
+        if (globalStore.get(this.activeTabIdAtom) != tabId) {
+            return;
+        }
+        globalStore.set(this.activeTabIdAtom, "");
+        const nextTab = remainingTabs[Math.min(tabIndex, remainingTabs.length - 1)];
+        if (nextTab) {
+            await this.showTab(nextTab);
+            return;
+        }
+        await this.clearTabs();
+    }
+
+    async handleConnectionChanged(connection: string): Promise<boolean> {
+        if (connection == this.activeConnection) {
+            return true;
+        }
+        if (this.hasUnsavedTabs() && !window.confirm("Discard unsaved changes and switch connections?")) {
+            await this.env.rpc.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", this.blockId),
+                meta: { connection: this.activeConnection },
+            });
+            return false;
+        }
+        this.activeConnection = connection;
+        await this.clearTabs();
+        this.restoreConnectionState(connection);
         return true;
     }
 
@@ -209,7 +440,6 @@ export class FileWorkspaceViewModel implements ViewModel {
                 name: fileInfo.name || getRootName(canonicalPath),
             };
             await this.persistRoots([...roots, root]);
-            globalStore.set(this.selectedRootIdAtom, root.id);
             globalStore.set(this.addRootOpenAtom, false);
             globalStore.set(this.addRootPathAtom, "~");
             this.setDirectoryExpanded(root.id, root.path, true);
@@ -222,20 +452,37 @@ export class FileWorkspaceViewModel implements ViewModel {
     }
 
     async removeRoot(rootId: string) {
+        this.captureActiveTab();
         const roots = this.getRoots();
+        const rootTabs = this.getTabs().filter((tab) => tab.rootId == rootId);
         if (
-            globalStore.get(this.selectedRootIdAtom) == rootId &&
-            !this.confirmDiscardUnsaved("Discard unsaved changes and remove this folder?")
+            rootTabs.some((tab) => tab.draftContent != null) &&
+            !window.confirm("Discard unsaved changes and remove this folder?")
         ) {
             return;
         }
+
+        const activeTabId = globalStore.get(this.activeTabIdAtom);
+        const activeTabRemoved = rootTabs.some((tab) => tab.id == activeTabId);
+        const remainingTabs = this.getTabs().filter((tab) => tab.rootId != rootId);
+        globalStore.set(this.tabsAtom, remainingTabs);
         await this.persistRoots(roots.filter((root) => root.id != rootId));
-        if (globalStore.get(this.selectedRootIdAtom) == rootId) {
-            globalStore.set(this.selectedRootIdAtom, "");
-            globalStore.set(this.selectedPathAtom, "");
-            globalStore.set(this.previewModel.gitDiffHunksAtom, []);
-            globalStore.set(this.previewModel.gitFileStatusAtom, "");
+
+        const rootPrefix = `${rootId}:`;
+        const expanded = globalStore.get(this.expandedDirectoriesAtom).filter((key) => !key.startsWith(rootPrefix));
+        globalStore.set(this.expandedDirectoriesAtom, expanded);
+        this.updateCachedConnectionState(this.activeConnection, expanded);
+        this.schedulePersistWorkspaceStates();
+
+        if (activeTabRemoved) {
+            globalStore.set(this.activeTabIdAtom, "");
+            if (remainingTabs.length > 0) {
+                await this.showTab(remainingTabs[remainingTabs.length - 1]);
+            } else {
+                await this.clearTabs();
+            }
         }
+
         const statuses = { ...globalStore.get(this.gitStatusesAtom) };
         const errors = { ...globalStore.get(this.gitErrorsAtom) };
         delete statuses[rootId];
@@ -252,19 +499,20 @@ export class FileWorkspaceViewModel implements ViewModel {
         } else {
             expandedDirectories.delete(key);
         }
-        globalStore.set(this.expandedDirectoriesAtom, Array.from(expandedDirectories));
+        const nextExpanded = Array.from(expandedDirectories);
+        globalStore.set(this.expandedDirectoriesAtom, nextExpanded);
+        this.updateCachedConnectionState(this.activeConnection, nextExpanded);
+        this.schedulePersistWorkspaceStates();
     }
 
     async toggleDirectory(root: FileWorkspaceRoot, path: string) {
         const key = getDirectoryKey(root.id, path);
         const expandedDirectories = new Set(globalStore.get(this.expandedDirectoriesAtom));
         if (expandedDirectories.has(key)) {
-            expandedDirectories.delete(key);
-            globalStore.set(this.expandedDirectoriesAtom, Array.from(expandedDirectories));
+            this.setDirectoryExpanded(root.id, path, false);
             return;
         }
-        expandedDirectories.add(key);
-        globalStore.set(this.expandedDirectoriesAtom, Array.from(expandedDirectories));
+        this.setDirectoryExpanded(root.id, path, true);
         await this.loadDirectory(root, path);
     }
 
@@ -281,7 +529,6 @@ export class FileWorkspaceViewModel implements ViewModel {
         try {
             const entries = await this.env.rpc.FileListCommand(TabRpcClient, {
                 path: formatRemoteUri(path, root.connection),
-                opts: { all: true },
             });
             entries.sort((left, right) => {
                 if (left.isdir != right.isdir) {
@@ -308,28 +555,29 @@ export class FileWorkspaceViewModel implements ViewModel {
     }
 
     async openFile(root: FileWorkspaceRoot, fileInfo: FileInfo) {
-        const selectedPath = globalStore.get(this.selectedPathAtom);
-        if (selectedPath == fileInfo.path) {
+        const connection = normalizeConnection(root.connection);
+        const existingTab = this.getTabs().find(
+            (tab) => normalizeConnection(tab.connection) == connection && tab.path == fileInfo.path
+        );
+        if (existingTab) {
+            await this.activateTab(existingTab.id);
             return;
         }
-        if (!this.confirmDiscardUnsaved("Discard unsaved changes and open another file?")) {
-            return;
-        }
-        globalStore.set(this.selectedRootIdAtom, root.id);
-        globalStore.set(this.selectedPathAtom, fileInfo.path);
-        globalStore.set(this.previewModel.fileContentSaved, null);
-        globalStore.set(this.previewModel.newFileContent, null);
-        globalStore.set(this.previewModel.gitDiffHunksAtom, []);
-        globalStore.set(this.previewModel.gitFileStatusAtom, "");
-        await this.env.rpc.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", this.blockId),
-            meta: {
-                connection: normalizeConnection(root.connection),
-                file: fileInfo.path,
-                edit: false,
-            },
-        });
-        await this.refreshSelectedFileDiff();
+        this.captureActiveTab();
+        const tab: FileWorkspaceTab = {
+            id: crypto.randomUUID(),
+            rootId: root.id,
+            connection,
+            path: fileInfo.path,
+            name: fileInfo.name || getRootName(fileInfo.path),
+            savedContent: null,
+            draftContent: null,
+            edit: false,
+            gitDiffHunks: [],
+            gitFileStatus: "",
+        };
+        globalStore.set(this.tabsAtom, [...this.getTabs(), tab]);
+        await this.showTab(tab);
     }
 
     async refreshGitStatus(root: FileWorkspaceRoot): Promise<GitStatusResponse | null> {
@@ -377,50 +625,71 @@ export class FileWorkspaceViewModel implements ViewModel {
     async setOpacity(opacity: number) {
         const nextOpacity = Math.min(1, Math.max(0.2, opacity));
         await this.env.rpc.SetConfigCommand(TabRpcClient, {
-            "window:magnifiedblockopacity": nextOpacity,
+            "fileworkspace:opacity": nextOpacity,
+        });
+    }
+
+    async setPanelWidth(width: number) {
+        const nextWidth = Math.min(1, Math.max(0.4, width));
+        await this.env.rpc.SetConfigCommand(TabRpcClient, {
+            "fileworkspace:width": nextWidth,
+        });
+    }
+
+    async setPanelHeight(height: number) {
+        const nextHeight = Math.min(1, Math.max(0.3, height));
+        await this.env.rpc.SetConfigCommand(TabRpcClient, {
+            "fileworkspace:height": nextHeight,
         });
     }
 
     async refreshSelectedFileDiff() {
-        const selectedPath = globalStore.get(this.selectedPathAtom);
-        const selectedRootId = globalStore.get(this.selectedRootIdAtom);
-        const root = this.getRoots().find((item) => item.id == selectedRootId);
-        if (!root || !selectedPath) {
+        const activeTab = this.getActiveTab();
+        const root = this.getRoots().find((item) => item.id == activeTab?.rootId);
+        if (!root || !activeTab?.path) {
             globalStore.set(this.previewModel.gitDiffHunksAtom, []);
             globalStore.set(this.previewModel.gitFileStatusAtom, "");
             return;
         }
+        const tabId = activeTab.id;
         const epoch = ++this.diffEpoch;
         try {
             const response = await this.env.rpc.RemoteGitFileDiffCommand(
                 TabRpcClient,
-                { path: selectedPath },
+                { path: activeTab.path },
                 { route: makeConnRoute(root.connection), timeout: 10000 }
             );
-            if (this.disposed || epoch != this.diffEpoch) {
+            if (this.disposed || epoch != this.diffEpoch || globalStore.get(this.activeTabIdAtom) != tabId) {
                 return;
             }
-            globalStore.set(this.previewModel.gitDiffHunksAtom, response?.hunks ?? []);
-            globalStore.set(this.previewModel.gitFileStatusAtom, response?.status ?? "");
+            const gitDiffHunks = response?.hunks ?? [];
+            const gitFileStatus = response?.status ?? "";
+            globalStore.set(this.previewModel.gitDiffHunksAtom, gitDiffHunks);
+            globalStore.set(this.previewModel.gitFileStatusAtom, gitFileStatus);
+            this.updateTab(tabId, { gitDiffHunks, gitFileStatus });
         } catch {
-            if (!this.disposed && epoch == this.diffEpoch) {
+            if (!this.disposed && epoch == this.diffEpoch && globalStore.get(this.activeTabIdAtom) == tabId) {
                 globalStore.set(this.previewModel.gitDiffHunksAtom, []);
                 globalStore.set(this.previewModel.gitFileStatusAtom, "");
+                this.updateTab(tabId, { gitDiffHunks: [], gitFileStatus: "" });
             }
         }
     }
 
     async refreshForActiveConnection() {
         const roots = this.getActiveRoots();
-        const expandedDirectories = new Set(globalStore.get(this.expandedDirectoriesAtom));
+        const expandedDirectories = globalStore.get(this.expandedDirectoriesAtom);
+        const directoryLoads: Promise<void>[] = [];
         for (const root of roots) {
-            const key = getDirectoryKey(root.id, root.path);
-            if (!expandedDirectories.has(key)) {
-                expandedDirectories.add(key);
+            const prefix = `${root.id}:`;
+            for (const key of expandedDirectories) {
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                directoryLoads.push(this.loadDirectory(root, key.slice(prefix.length)));
             }
         }
-        globalStore.set(this.expandedDirectoriesAtom, Array.from(expandedDirectories));
-        await Promise.all([...roots.map((root) => this.loadDirectory(root, root.path)), this.refreshGitStatuses()]);
+        await Promise.all([...directoryLoads, this.refreshGitStatuses()]);
     }
 
     async saveFile() {
@@ -437,12 +706,8 @@ export class FileWorkspaceViewModel implements ViewModel {
         }
     }
 
-    confirmDiscardUnsaved(message: string): boolean {
-        return globalStore.get(this.previewModel.newFileContent) == null || window.confirm(message);
-    }
-
     requestClose(): boolean {
-        return this.confirmDiscardUnsaved("Discard unsaved changes and close the file workspace?");
+        return !this.hasUnsavedTabs() || window.confirm("Discard unsaved changes and close the file workspace?");
     }
 
     giveFocus(): boolean {
@@ -454,6 +719,11 @@ export class FileWorkspaceViewModel implements ViewModel {
     dispose() {
         this.disposed = true;
         clearInterval(this.gitPollTimer);
+        if (this.persistStateTimer != null) {
+            clearTimeout(this.persistStateTimer);
+            this.persistStateTimer = null;
+            fireAndForget(() => this.persistWorkspaceStates());
+        }
     }
 }
 

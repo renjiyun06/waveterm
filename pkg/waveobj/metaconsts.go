@@ -103,6 +103,7 @@ const (
 	MetaKey_LayoutWidgetsVisible             = "layout:widgetsvisible"
 
 	MetaKey_FileWorkspaceRoots               = "fileworkspace:roots"
+	MetaKey_FileWorkspaceStates              = "fileworkspace:states"
 
 	MetaKey_WaveAiPanelOpen                  = "waveai:panelopen"
 	MetaKey_WaveAiPanelWidth                 = "waveai:panelwidth"

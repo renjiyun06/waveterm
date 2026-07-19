@@ -1,12 +1,14 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Popover, PopoverButton, PopoverContent } from "@/app/element/popover";
 import { PreviewView } from "@/app/view/preview/preview";
+import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import type { FileWorkspaceViewModel } from "./fileworkspace-model";
+import type { FileWorkspaceTab, FileWorkspaceViewModel } from "./fileworkspace-model";
 import { getDirectoryKey } from "./fileworkspace-model";
 import "./fileworkspace.scss";
 
@@ -229,6 +231,82 @@ const AddRootForm = memo(({ model }: { model: FileWorkspaceViewModel }) => {
 });
 AddRootForm.displayName = "AddRootForm";
 
+type WorkspaceSettingSliderProps = {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (value: number) => void;
+};
+
+const WorkspaceSettingSlider = memo(({ label, value, min, max, step, onChange }: WorkspaceSettingSliderProps) => {
+    return (
+        <label className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-2 text-[11px] text-secondary">
+            <span>{label}</span>
+            <input
+                aria-label={label}
+                className="fileworkspace-setting-slider min-w-0 cursor-pointer"
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={(event) => onChange(Number(event.target.value))}
+            />
+            <span className="text-right tabular-nums text-primary">{Math.round(value * 100)}%</span>
+        </label>
+    );
+});
+WorkspaceSettingSlider.displayName = "WorkspaceSettingSlider";
+
+const FileWorkspaceSettings = memo(({ model }: { model: FileWorkspaceViewModel }) => {
+    const opacity = useAtomValue(model.opacityAtom) ?? 0.9;
+    const panelWidth = useAtomValue(model.panelWidthAtom) ?? 1;
+    const panelHeight = useAtomValue(model.panelHeightAtom) ?? 0.78;
+
+    return (
+        <Popover placement="bottom-end">
+            <PopoverButton
+                className="ghost grey !flex !h-6 !w-6 !items-center !justify-center !p-0 cursor-pointer"
+                title="File workspace appearance"
+            >
+                <i className="fa-sharp fa-solid fa-sliders" />
+            </PopoverButton>
+            <PopoverContent className="fileworkspace-settings-popover">
+                <div className="mb-3 text-[11px] font-semibold text-primary">Panel appearance</div>
+                <div className="flex flex-col gap-3">
+                    <WorkspaceSettingSlider
+                        label="Opacity"
+                        value={opacity}
+                        min={0.2}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => fireAndForget(() => model.setOpacity(value))}
+                    />
+                    <WorkspaceSettingSlider
+                        label="Width"
+                        value={panelWidth}
+                        min={0.4}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => fireAndForget(() => model.setPanelWidth(value))}
+                    />
+                    <WorkspaceSettingSlider
+                        label="Height"
+                        value={panelHeight}
+                        min={0.3}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => fireAndForget(() => model.setPanelHeight(value))}
+                    />
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+});
+FileWorkspaceSettings.displayName = "FileWorkspaceSettings";
+
 const ExplorerPane = memo(({ model }: { model: FileWorkspaceViewModel }) => {
     const roots = useAtomValue(model.activeRootsAtom);
     const connection = useAtomValue(model.connectionAtom);
@@ -255,6 +333,7 @@ const ExplorerPane = memo(({ model }: { model: FileWorkspaceViewModel }) => {
                 >
                     <i className="fa-sharp fa-solid fa-folder-plus" />
                 </button>
+                <FileWorkspaceSettings model={model} />
             </div>
             {addRootOpen && <AddRootForm model={model} />}
             <div className="min-h-0 flex-1 overflow-auto">
@@ -279,31 +358,110 @@ const ExplorerPane = memo(({ model }: { model: FileWorkspaceViewModel }) => {
 });
 ExplorerPane.displayName = "ExplorerPane";
 
+type FileTabProps = {
+    model: FileWorkspaceViewModel;
+    tab: FileWorkspaceTab;
+    active: boolean;
+    dirty: boolean;
+    gitStatus: string;
+};
+
+const FileTab = memo(({ model, tab, active, dirty, gitStatus }: FileTabProps) => {
+    return (
+        <div
+            className={`group flex h-full min-w-28 max-w-56 shrink-0 items-center border-r border-border/50 ${
+                active ? "bg-white/[0.08] text-primary" : "bg-black/10 text-secondary hover:bg-white/[0.04]"
+            }`}
+            title={tab.path}
+        >
+            <button
+                type="button"
+                className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5 text-left cursor-pointer"
+                onClick={() => fireAndForget(() => model.activateTab(tab.id))}
+            >
+                <i className="fa-sharp fa-solid fa-file-code shrink-0 text-[10px]" />
+                <span className="min-w-0 flex-1 truncate text-[11px]">{tab.name}</span>
+                {gitStatus && (
+                    <span className={`shrink-0 text-[9px] font-bold ${getStatusClass(gitStatus)}`}>{gitStatus}</span>
+                )}
+                {dirty && (
+                    <span className="shrink-0 text-[12px] leading-none text-amber-300" title="Unsaved changes">
+                        ●
+                    </span>
+                )}
+            </button>
+            <button
+                type="button"
+                aria-label={`Close ${tab.name}`}
+                className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] opacity-0 hover:bg-white/10 group-hover:opacity-100 cursor-pointer"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    fireAndForget(() => model.closeTab(tab.id));
+                }}
+            >
+                <i className="fa-sharp fa-solid fa-xmark" />
+            </button>
+        </div>
+    );
+});
+FileTab.displayName = "FileTab";
+
+const FileTabs = memo(({ model }: { model: FileWorkspaceViewModel }) => {
+    const tabs = useAtomValue(model.tabsAtom);
+    const activeTabId = useAtomValue(model.activeTabIdAtom);
+    const activeDraft = useAtomValue(model.previewModel.newFileContent);
+    const activeGitStatus = useAtomValue(model.previewModel.gitFileStatusAtom);
+
+    if (tabs.length == 0) {
+        return null;
+    }
+    return (
+        <div className="fileworkspace-tabs flex h-8 shrink-0 overflow-x-auto border-b border-border/60">
+            {tabs.map((tab) => {
+                const active = tab.id == activeTabId;
+                return (
+                    <FileTab
+                        key={tab.id}
+                        model={model}
+                        tab={tab}
+                        active={active}
+                        dirty={active ? activeDraft != null : tab.draftContent != null}
+                        gitStatus={active ? activeGitStatus : tab.gitFileStatus}
+                    />
+                );
+            })}
+        </div>
+    );
+});
+FileTabs.displayName = "FileTabs";
+
 const EditorPane = memo(
     ({ model, blockRef }: { model: FileWorkspaceViewModel; blockRef: React.RefObject<HTMLDivElement> }) => {
         const selectedPath = useAtomValue(model.selectedPathAtom);
+        const activeTabId = useAtomValue(model.activeTabIdAtom);
         const newFileContent = useAtomValue(model.previewModel.newFileContent);
         const canPreview = useAtomValue(model.previewModel.canPreview);
         const editMode = useAtomValue(model.previewModel.editMode);
         const gitFileStatus = useAtomValue(model.previewModel.gitFileStatusAtom);
-        const opacity = useAtomValue(model.opacityAtom) ?? 0.6;
         const editorContentRef = useRef<HTMLDivElement>(null);
-        const fileName = selectedPath.split(/[\\/]/).pop() || selectedPath;
 
         if (!selectedPath) {
             return (
-                <div className="flex h-full flex-col items-center justify-center text-secondary">
-                    <i className="fa-sharp fa-solid fa-file-code mb-3 text-3xl opacity-40" />
-                    <div className="text-[12px]">Select a file to preview or edit</div>
+                <div className="flex h-full min-w-0 flex-col">
+                    <FileTabs model={model} />
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-secondary">
+                        <i className="fa-sharp fa-solid fa-file-code mb-3 text-3xl opacity-40" />
+                        <div className="text-[12px]">Select a file to preview or edit</div>
+                    </div>
                 </div>
             );
         }
         return (
             <div className="flex h-full min-w-0 flex-col">
+                <FileTabs model={model} />
                 <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-                    <i className="fa-sharp fa-solid fa-file-code text-secondary" />
-                    <span className="min-w-0 truncate text-[12px] text-primary" title={selectedPath}>
-                        {fileName}
+                    <span className="min-w-0 flex-1 truncate text-[10px] text-secondary" title={selectedPath}>
+                        {selectedPath}
                     </span>
                     {gitFileStatus && (
                         <span className={`text-[10px] font-bold ${getStatusClass(gitFileStatus)}`}>
@@ -315,25 +473,6 @@ const EditorPane = memo(
                             ●
                         </span>
                     )}
-                    <span className="min-w-0 flex-1 truncate text-[10px] text-secondary" title={selectedPath}>
-                        {selectedPath}
-                    </span>
-                    <label
-                        className="flex items-center gap-1 text-secondary"
-                        title={`Panel opacity: ${Math.round(opacity * 100)}%`}
-                    >
-                        <i className="fa-sharp fa-solid fa-circle-half-stroke text-[10px]" />
-                        <input
-                            aria-label="Panel opacity"
-                            className="fileworkspace-opacity-slider w-16 cursor-pointer"
-                            type="range"
-                            min="0.2"
-                            max="1"
-                            step="0.05"
-                            value={opacity}
-                            onChange={(event) => fireAndForget(() => model.setOpacity(Number(event.target.value)))}
-                        />
-                    </label>
                     {canPreview && (
                         <button
                             type="button"
@@ -364,6 +503,7 @@ const EditorPane = memo(
                 </div>
                 <div className="fileworkspace-preview min-h-0 flex-1">
                     <PreviewView
+                        key={activeTabId}
                         blockId={model.blockId}
                         blockRef={blockRef}
                         contentRef={editorContentRef}
@@ -379,6 +519,10 @@ EditorPane.displayName = "EditorPane";
 function FileWorkspaceView({ blockId, blockRef, model }: ViewComponentProps<FileWorkspaceViewModel>) {
     const connection = useAtomValue(model.connectionAtom);
     const roots = useAtomValue(model.activeRootsAtom);
+    const explorerWidth = useAtomValue(model.explorerWidthAtom);
+    const explorerLayoutVersion = useAtomValue(model.explorerLayoutVersionAtom);
+    const panelWidth = useAtomValue(model.panelWidthAtom);
+    const panelHeight = useAtomValue(model.panelHeightAtom);
     const rootsKey = useMemo(() => roots.map((root) => root.id).join(","), [roots]);
 
     useEffect(() => {
@@ -389,14 +533,22 @@ function FileWorkspaceView({ blockId, blockRef, model }: ViewComponentProps<File
         });
     }, [connection, rootsKey]);
 
+    useEffect(() => {
+        getLayoutModelForStaticTab()?.updateTree(false);
+    }, [panelWidth, panelHeight]);
+
     return (
         <div
             data-fileworkspace={blockId}
             tabIndex={-1}
             className="fileworkspace-slide-in flex h-full w-full min-w-0 overflow-hidden outline-none"
         >
-            <PanelGroup direction="horizontal">
-                <Panel defaultSize={28} minSize={16} maxSize={48}>
+            <PanelGroup
+                key={`${connection}:${explorerLayoutVersion}`}
+                direction="horizontal"
+                onLayout={(sizes) => model.setExplorerWidth(sizes[0])}
+            >
+                <Panel defaultSize={explorerWidth} minSize={16} maxSize={48}>
                     <ExplorerPane model={model} />
                 </Panel>
                 <PanelResizeHandle className="w-1 bg-transparent hover:bg-accent/30 transition-colors cursor-col-resize" />

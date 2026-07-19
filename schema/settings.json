@@ -53,6 +53,18 @@
             "left"
           ]
         },
+        "fileworkspace:*": {
+          "type": "boolean"
+        },
+        "fileworkspace:opacity": {
+          "type": "number"
+        },
+        "fileworkspace:width": {
+          "type": "number"
+        },
+        "fileworkspace:height": {
+          "type": "number"
+        },
         "feature:waveappbuilder": {
           "type": "boolean"
         },
