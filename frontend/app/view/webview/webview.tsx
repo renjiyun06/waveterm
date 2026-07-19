@@ -841,6 +841,15 @@ function WebViewPreviewFallback({ url }: { url?: string | null }) {
     );
 }
 
+function loadPopupInCurrentWebView(model: Pick<WebViewModel, "nodeModel" | "loadUrl">, newUrl: string): boolean {
+    const ephemeralSessionAtom = model.nodeModel.isEphemeralSession;
+    if (!newUrl || !ephemeralSessionAtom || !globalStore.get(ephemeralSessionAtom)) {
+        return false;
+    }
+    model.loadUrl(newUrl, "workbench-popup");
+    return true;
+}
+
 const WebView = memo(({ model, onFailLoad, blockRef, initialSrc }: WebViewProps) => {
     const env = useWaveEnv<WebViewEnv>();
     const blockData = useAtomValue(model.blockAtom);
@@ -1028,7 +1037,13 @@ const WebView = memo(({ model, onFailLoad, blockRef, initialSrc }: WebViewProps)
         };
         const newWindowHandler = (e: any) => {
             e.preventDefault();
-            const newUrl = e.detail.url;
+            const newUrl = e.detail?.url ?? e.url;
+            if (!newUrl) {
+                return;
+            }
+            if (loadPopupInCurrentWebView(model, newUrl)) {
+                return;
+            }
             fireAndForget(() => openLink(newUrl, true));
         };
         const startLoadingHandler = () => {
@@ -1132,4 +1147,4 @@ const WebView = memo(({ model, onFailLoad, blockRef, initialSrc }: WebViewProps)
     );
 });
 
-export { WebView, WebViewPreviewFallback, getWebPreviewDisplayUrl };
+export { WebView, WebViewPreviewFallback, getWebPreviewDisplayUrl, loadPopupInCurrentWebView };

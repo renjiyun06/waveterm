@@ -182,12 +182,17 @@ function NodeBackdrops({ layoutModel }: { layoutModel: LayoutModel }) {
                 <div
                     className="ephemeral-node-backdrop"
                     onClick={() => {
-                        const blockId = ephemeralNode?.data?.blockId;
-                        const blockComponentModel = blockId ? getBlockComponentModel(blockId) : null;
-                        if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+                        if (!ephemeralNode) {
                             return;
                         }
-                        layoutModel.closeNode(ephemeralNode?.id);
+                        const blockId = ephemeralNode.data?.blockId;
+                        if (!layoutModel.isEphemeralSessionNode(ephemeralNode.id)) {
+                            const blockComponentModel = blockId ? getBlockComponentModel(blockId) : null;
+                            if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+                                return;
+                            }
+                        }
+                        layoutModel.closeNode(ephemeralNode.id);
                     }}
                     style={{ "--block-blur": blockBlurStr } as CSSProperties}
                 />

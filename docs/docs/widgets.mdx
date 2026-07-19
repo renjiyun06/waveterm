@@ -55,15 +55,19 @@ The usual terminal you know and love. We add a few plugins via the `wsh` command
 Preview is the generic type of widget used for viewing files. This can take many different forms based on the type of file being viewed.
 You can use \`wsh view [path]\` from any Wave terminal window to open a preview widget with the contents of the specified path (e.g. `wsh view .` or `wsh view ~/myimage.jpg`).
 
-### File Workspace
+### Transient Workbench
 
-Press <Kbd k="Cmd:Shift:e" /> to slide a temporary file workspace down over the current terminal layout. Press the shortcut again to close it. Change the shortcut with `app:fileworkspacekeybinding` in `settings.json`; changes apply immediately. The panel uses the focused block's connection and lets you switch connections from its header.
+Press <Kbd k="Cmd:Shift:e" /> to slide a temporary workbench down over the current terminal layout. Press the shortcut again to hide it. Change the shortcut with `app:fileworkspacekeybinding` in `settings.json`; changes apply immediately.
+
+Use the mode switcher in the workbench header to choose Files, Terminal, or Browser. Each mode has its own live session: switching modes or hiding the workbench keeps file tabs and drafts, the terminal process and scrollback, and browser navigation intact. These transient sessions reset when Wave restarts. Links that request a new browser window are loaded in the same workbench browser instead of creating another block.
+
+Files uses the focused block's connection when it is first opened and lets you switch connections from its header.
 
 Folders added to the explorer are stored with the current Wave workspace and can be removed without deleting them from disk. Each connection has its own folder list. Expanded folders and the resizable explorer width are remembered per workspace and connection. The editor supports multiple file tabs and warns before discarding unsaved tab contents.
 
 Git repositories show dirty folders and files, while the editor gutter marks added, modified, and deleted lines. Unsaved editor changes are shown separately from Git status.
 
-Use the sliders button in the explorer header to adjust the panel opacity, width, and height. The corresponding settings are `fileworkspace:opacity`, `fileworkspace:width`, and `fileworkspace:height`; they are independent from magnified block settings.
+Use the sliders button in the Files explorer header to adjust the workbench opacity, width, and height. The corresponding settings are `fileworkspace:opacity`, `fileworkspace:width`, and `fileworkspace:height`; they apply to all three workbench modes and are independent from magnified block settings.
 
 #### Directory
 

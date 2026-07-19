@@ -22,6 +22,7 @@ import {
 } from "@/app/store/global";
 import { getActiveTabModel } from "@/app/store/tab-model";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
+import type { EphemeralSessionMode, LayoutModel } from "@/layout/index";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import { isWindows } from "@/util/platformutil";
@@ -29,6 +30,7 @@ import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { fireAndForget } from "@/util/util";
 import * as jotai from "jotai";
 import { modalsModel } from "./modalmodel";
+import { ObjectService } from "./services";
 import { isBuilderWindow, isTabWindow } from "./windowtype";
 
 type KeyHandler = (event: WaveKeyboardEvent) => boolean;
@@ -39,6 +41,7 @@ const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
 let fileWorkspaceKeybinding = "";
 let fileWorkspaceKeybindingUnsubscribe: () => void;
+const ephemeralModeCreationPromises = new WeakMap<LayoutModel, Map<EphemeralSessionMode, Promise<string>>>();
 
 // track current chord state and timeout (for resetting)
 let activeChord: string | null = null;
@@ -127,7 +130,8 @@ function getStaticTabBlockCount(): number {
     const tabORef = WOS.makeORef("tab", tabId);
     const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
     const tabData = globalStore.get(tabAtom);
-    return tabData?.blockids?.length ?? 0;
+    const layoutModel = getLayoutModelForStaticTab();
+    return tabData?.blockids?.filter((blockId) => !layoutModel.isEphemeralSessionBlock(blockId)).length ?? 0;
 }
 
 function simpleCloseStaticTab() {
@@ -147,6 +151,11 @@ function simpleCloseStaticTab() {
 }
 
 function uxCloseBlock(blockId: string) {
+    const layoutModel = getLayoutModelForStaticTab();
+    if (layoutModel?.isEphemeralSessionBlock(blockId)) {
+        layoutModel.hideEphemeralSession();
+        return;
+    }
     const blockComponentModel = getBlockComponentModel(blockId);
     if (blockComponentModel?.viewModel?.requestClose?.() === false) {
         return;
@@ -174,7 +183,6 @@ function uxCloseBlock(blockId: string) {
         return;
     }
 
-    const layoutModel = getLayoutModelForStaticTab();
     const node = layoutModel.getNodeByBlockId(blockId);
     if (node) {
         fireAndForget(() => layoutModel.closeNode(node.id));
@@ -192,14 +200,20 @@ function genericClose() {
         return;
     }
 
+    const layoutModel = getLayoutModelForStaticTab();
+    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const blockId = focusedNode?.data?.blockId;
+    if (blockId && layoutModel.isEphemeralSessionBlock(blockId)) {
+        layoutModel.hideEphemeralSession();
+        return;
+    }
+
     const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
     const isAIPanelOpen = workspaceLayoutModel.getAIPanelVisible();
     if (isAIPanelOpen && getStaticTabBlockCount() === 1) {
         const aiModel = WaveAIModel.getInstance();
         const shouldSwitchToAI = !globalStore.get(aiModel.isChatEmptyAtom) || aiModel.hasNonEmptyInput();
         if (shouldSwitchToAI) {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = globalStore.get(layoutModel.focusedNode);
             if (focusedNode) {
                 replaceBlock(focusedNode.data.blockId, { meta: { view: "launcher" } }, false);
                 setTimeout(() => WaveAIModel.getInstance().focusInput(), 50);
@@ -207,9 +221,6 @@ function genericClose() {
             }
         }
     }
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
-    const blockId = focusedNode?.data?.blockId;
     const blockComponentModel = blockId ? getBlockComponentModel(blockId) : null;
     if (blockComponentModel?.viewModel?.requestClose?.() === false) {
         return;
@@ -396,6 +407,9 @@ async function handleSplitHorizontal(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
+    if (layoutModel.isEphemeralSessionNode(focusedNode.id)) {
+        return;
+    }
     const blockDef = getDefaultNewBlockDef();
     await createBlockSplitHorizontally(blockDef, focusedNode.data.blockId, position);
 }
@@ -406,42 +420,128 @@ async function handleSplitVertical(position: "before" | "after") {
     if (focusedNode == null) {
         return;
     }
+    if (layoutModel.isEphemeralSessionNode(focusedNode.id)) {
+        return;
+    }
     const blockDef = getDefaultNewBlockDef();
     await createBlockSplitVertically(blockDef, focusedNode.data.blockId, position);
+}
+
+function getEphemeralModeBlockDef(layoutModel: LayoutModel, mode: EphemeralSessionMode): BlockDef {
+    const activeEphemeralNode = globalStore.get(layoutModel.ephemeralNode);
+    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const sourceBlockId = activeEphemeralNode?.data?.blockId ?? focusedNode?.data?.blockId;
+    const sourceBlockAtom = sourceBlockId ? WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", sourceBlockId)) : null;
+    const sourceBlock = sourceBlockAtom ? globalStore.get(sourceBlockAtom) : null;
+    const filesBlockId = layoutModel.getEphemeralSessionNode("files")?.data?.blockId;
+    const filesBlockAtom = filesBlockId ? WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", filesBlockId)) : null;
+    const filesBlock = filesBlockAtom ? globalStore.get(filesBlockAtom) : null;
+    const sourceConnection = sourceBlock?.meta?.connection ?? filesBlock?.meta?.connection;
+
+    if (mode === "terminal") {
+        const blockDef: BlockDef = {
+            meta: {
+                view: "term",
+                controller: "shell",
+            },
+        };
+        if (sourceConnection != null) {
+            blockDef.meta.connection = sourceConnection;
+        }
+        if (sourceBlock?.meta?.view === "term" && sourceBlock.meta["cmd:cwd"] != null) {
+            blockDef.meta["cmd:cwd"] = sourceBlock.meta["cmd:cwd"];
+        }
+        return blockDef;
+    }
+    if (mode === "browser") {
+        return {
+            meta: {
+                view: "web",
+            },
+        };
+    }
+    return {
+        meta: {
+            view: "fileworkspace",
+            connection: sourceConnection,
+        },
+    };
+}
+
+async function switchEphemeralWorkbenchMode(mode: EphemeralSessionMode): Promise<void> {
+    const layoutModel = getLayoutModelForStaticTab();
+    layoutModel.requestEphemeralSessionMode(mode);
+    if (layoutModel.showEphemeralSession(mode)) {
+        return;
+    }
+
+    let creationPromises = ephemeralModeCreationPromises.get(layoutModel);
+    if (!creationPromises) {
+        creationPromises = new Map();
+        ephemeralModeCreationPromises.set(layoutModel, creationPromises);
+    }
+
+    let creationPromise = creationPromises.get(mode);
+    if (!creationPromise) {
+        const blockDef = getEphemeralModeBlockDef(layoutModel, mode);
+        creationPromise = ObjectService.CreateBlock(blockDef, {
+            termsize: { rows: 25, cols: 80 },
+        });
+        creationPromises.set(mode, creationPromise);
+    }
+
+    try {
+        const blockId = await creationPromise;
+        if (!layoutModel.getEphemeralSessionNode(mode)) {
+            layoutModel.newEphemeralSessionNode(blockId, mode, "top", blockDefView(mode), false);
+        }
+        if (layoutModel.isEphemeralSessionModeRequested(mode)) {
+            layoutModel.showEphemeralSession(mode);
+        }
+    } finally {
+        if (creationPromises.get(mode) === creationPromise) {
+            creationPromises.delete(mode);
+        }
+    }
+}
+
+function blockDefView(mode: EphemeralSessionMode): string {
+    if (mode === "files") {
+        return "fileworkspace";
+    }
+    if (mode === "terminal") {
+        return "term";
+    }
+    return "web";
 }
 
 function toggleFileWorkspace() {
     const layoutModel = getLayoutModelForStaticTab();
     const ephemeralNode = globalStore.get(layoutModel.ephemeralNode);
     if (ephemeralNode != null) {
-        const ephemeralBlockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", ephemeralNode.data.blockId));
-        const ephemeralBlock = globalStore.get(ephemeralBlockAtom);
-        if (ephemeralBlock?.meta?.view == "fileworkspace") {
-            const blockComponentModel = getBlockComponentModel(ephemeralNode.data.blockId);
-            if (blockComponentModel?.viewModel?.requestClose?.() === false) {
-                return;
-            }
-            fireAndForget(() => layoutModel.closeNode(ephemeralNode.id));
+        if (layoutModel.isEphemeralSessionNode(ephemeralNode.id)) {
+            layoutModel.hideEphemeralSession();
             return;
         }
+        const blockComponentModel = getBlockComponentModel(ephemeralNode.data.blockId);
+        if (blockComponentModel?.viewModel?.requestClose?.() === false) {
+            return;
+        }
+        fireAndForget(async () => {
+            await layoutModel.closeNode(ephemeralNode.id);
+            await switchEphemeralWorkbenchMode(
+                layoutModel.hasEphemeralSession() ? layoutModel.lastEphemeralSessionMode : "files"
+            );
+        });
+        return;
+    }
+    if ((ephemeralModeCreationPromises.get(layoutModel)?.size ?? 0) > 0) {
+        layoutModel.cancelEphemeralSessionRequest();
+        return;
     }
 
-    const focusedBlockId = getFocusedBlockId();
-    const focusedBlockAtom = focusedBlockId
-        ? WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", focusedBlockId))
-        : null;
-    const focusedBlock = focusedBlockAtom ? globalStore.get(focusedBlockAtom) : null;
     fireAndForget(() =>
-        createBlock(
-            {
-                meta: {
-                    view: "fileworkspace",
-                    connection: focusedBlock?.meta?.connection,
-                },
-            },
-            false,
-            true
-        )
+        switchEphemeralWorkbenchMode(layoutModel.hasEphemeralSession() ? layoutModel.lastEphemeralSessionMode : "files")
     );
 }
 
@@ -870,6 +970,7 @@ export {
     registerControlShiftStateUpdateHandler,
     registerElectronReinjectKeyHandler,
     registerGlobalKeys,
+    switchEphemeralWorkbenchMode,
     tryReinjectKey,
     unsetControlShift,
     uxCloseBlock,

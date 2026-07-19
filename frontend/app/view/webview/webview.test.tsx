@@ -3,10 +3,10 @@
 
 import { globalStore } from "@/app/store/jotaiStore";
 import { makeMockWaveEnv } from "@/preview/mock/mockwaveenv";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
 import { atom } from "jotai";
-import { getWebPreviewDisplayUrl, WebViewModel, WebViewPreviewFallback } from "./webview";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { getWebPreviewDisplayUrl, loadPopupInCurrentWebView, WebViewModel, WebViewPreviewFallback } from "./webview";
 
 describe("webview preview fallback", () => {
     it("shows the requested URL", () => {
@@ -19,6 +19,24 @@ describe("webview preview fallback", () => {
     it("falls back to about:blank when no URL is available", () => {
         expect(getWebPreviewDisplayUrl("")).toBe("about:blank");
         expect(getWebPreviewDisplayUrl(null)).toBe("about:blank");
+    });
+
+    it("keeps popup navigation inside an ephemeral workbench browser", () => {
+        const loadUrl = vi.fn();
+        const workbenchModel = {
+            nodeModel: { isEphemeralSession: atom(true) },
+            loadUrl,
+        } as any;
+        const regularModel = {
+            nodeModel: { isEphemeralSession: atom(false) },
+            loadUrl,
+        } as any;
+
+        expect(loadPopupInCurrentWebView(workbenchModel, "https://example.com/next")).toBe(true);
+        expect(loadUrl).toHaveBeenCalledWith("https://example.com/next", "workbench-popup");
+        loadUrl.mockClear();
+        expect(loadPopupInCurrentWebView(regularModel, "https://example.com/next")).toBe(false);
+        expect(loadUrl).not.toHaveBeenCalled();
     });
 
     it("uses the supplied env for homepage atoms and config updates", async () => {

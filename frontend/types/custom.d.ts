@@ -52,6 +52,7 @@ declare global {
         blockId: string;
         ephemeralPosition?: "center" | "top" | "bottom";
         ephemeralView?: string;
+        ephemeralSessionMode?: "files" | "terminal" | "browser";
     };
 
     type GlobalInitOptions = {

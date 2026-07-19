@@ -7,6 +7,7 @@ import { deleteLayoutModelForTab, getLayoutModelForStaticTab, useDebouncedNodeIn
 import { newLayoutNode } from "./lib/layoutNode";
 import type {
     ContentRenderer,
+    EphemeralSessionMode,
     LayoutNode,
     LayoutTreeAction,
     LayoutTreeClearPendingAction,
@@ -40,6 +41,7 @@ export {
 };
 export type {
     ContentRenderer,
+    EphemeralSessionMode,
     LayoutNode,
     LayoutTreeAction,
     LayoutTreeClearPendingAction,

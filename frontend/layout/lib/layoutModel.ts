@@ -29,6 +29,7 @@ import {
 } from "./layoutTree";
 import {
     ContentRenderer,
+    EphemeralSessionMode,
     FlexDirection,
     LayoutNode,
     LayoutNodeAdditionalProps,
@@ -217,6 +218,13 @@ export class LayoutModel {
      */
     ephemeralNode: PrimitiveAtom<LayoutNode>;
     /**
+     * Ephemeral workbench nodes stay mounted for the lifetime of this renderer session.
+     * Only the active node is exposed through ephemeralNode; the others are rendered offscreen.
+     */
+    ephemeralSessionNodes: PrimitiveAtom<Partial<Record<EphemeralSessionMode, LayoutNode>>>;
+    lastEphemeralSessionMode: EphemeralSessionMode;
+    private ephemeralSessionVisibleIntent: boolean;
+    /**
      * The last node to be an ephemeral node. This node should sit at a higher z-index than the others so that it floats above the other nodes as it returns to its original position.
      */
     lastEphemeralNodeId: string;
@@ -331,6 +339,9 @@ export class LayoutModel {
         });
 
         this.ephemeralNode = atom();
+        this.ephemeralSessionNodes = atom({});
+        this.lastEphemeralSessionMode = "files";
+        this.ephemeralSessionVisibleIntent = false;
         this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
         this.fileWorkspaceWidthAtom = getSettingsKeyAtom("fileworkspace:width");
         this.fileWorkspaceHeightAtom = getSettingsKeyAtom("fileworkspace:height");
@@ -429,6 +440,11 @@ export class LayoutModel {
                 layoutBlockIds.add(node.data.blockId);
             }
         });
+        for (const node of Object.values(this.getter(this.ephemeralSessionNodes))) {
+            if (node?.data?.blockId) {
+                layoutBlockIds.add(node.data.blockId);
+            }
+        }
 
         for (const blockId of tab.blockids || []) {
             if (!layoutBlockIds.has(blockId)) {
@@ -758,9 +774,12 @@ export class LayoutModel {
             if (balanceTree) this.treeState.rootNode = balanceNode(this.treeState.rootNode, callback);
             else walkNodes(this.treeState.rootNode, callback);
 
-            // Process ephemeral node, if present.
+            // Process the ordinary ephemeral node, if present. Workbench session nodes are
+            // handled below so inactive modes can remain mounted without entering focus order.
             const ephemeralNode = this.getter(this.ephemeralNode);
-            if (ephemeralNode) {
+            const ephemeralSessionNodes = Object.values(this.getter(this.ephemeralSessionNodes)).filter(Boolean);
+            const ephemeralSessionNodeIds = new Set(ephemeralSessionNodes.map((node) => node.id));
+            if (ephemeralNode && !ephemeralSessionNodeIds.has(ephemeralNode.id)) {
                 this.updateEphemeralNodeProps(
                     ephemeralNode,
                     newAdditionalProps,
@@ -770,10 +789,29 @@ export class LayoutModel {
                 );
             }
 
-            this.treeState.leafOrder = getLeafOrder(newLeafs, newAdditionalProps);
+            for (const sessionNode of ephemeralSessionNodes) {
+                this.updateEphemeralNodeProps(
+                    sessionNode,
+                    newAdditionalProps,
+                    newLeafs,
+                    magnifiedNodeSize,
+                    boundingRect,
+                    ephemeralNode?.id !== sessionNode.id
+                );
+            }
+
+            const visibleLeafs = newLeafs.filter(
+                (node) => !ephemeralSessionNodeIds.has(node.id) || node.id === ephemeralNode?.id
+            );
+            this.treeState.leafOrder = getLeafOrder(visibleLeafs, newAdditionalProps);
             this.validateFocusedNode(this.treeState.leafOrder);
             this.validateMagnifiedNode(this.treeState.leafOrder, newAdditionalProps);
-            this.cleanupNodeModels(this.treeState.leafOrder);
+            this.cleanupNodeModels(
+                newLeafs.map((node) => ({
+                    nodeid: node.id,
+                    blockid: node.data.blockId,
+                }))
+            );
             this.setter(
                 this.leafs,
                 newLeafs.sort((a, b) => a.id.localeCompare(b.id))
@@ -1087,8 +1125,16 @@ export class LayoutModel {
                 }),
                 isEphemeral: atom((get) => {
                     const ephemeralNode = get(this.ephemeralNode);
-                    return ephemeralNode?.id === nodeid;
+                    const sessionNodes = Object.values(get(this.ephemeralSessionNodes));
+                    return (
+                        ephemeralNode?.id === nodeid || sessionNodes.some((sessionNode) => sessionNode?.id === nodeid)
+                    );
                 }),
+                isEphemeralSession: atom((get) => {
+                    const sessionNodes = Object.values(get(this.ephemeralSessionNodes));
+                    return sessionNodes.some((sessionNode) => sessionNode?.id === nodeid);
+                }),
+                ephemeralSessionMode: node.data.ephemeralSessionMode,
                 addEphemeralNodeToLayout: () => this.addEphemeralNodeToLayout(),
                 animationTimeS: this.animationTimeS,
                 ready: this.ready,
@@ -1269,6 +1315,35 @@ export class LayoutModel {
         return undefined;
     }
 
+    getEphemeralSessionNode(mode: EphemeralSessionMode): LayoutNode | undefined {
+        return this.getter(this.ephemeralSessionNodes)[mode];
+    }
+
+    hasEphemeralSession(): boolean {
+        return Object.values(this.getter(this.ephemeralSessionNodes)).some(Boolean);
+    }
+
+    isEphemeralSessionNode(nodeId: string): boolean {
+        return Object.values(this.getter(this.ephemeralSessionNodes)).some((node) => node?.id === nodeId);
+    }
+
+    isEphemeralSessionBlock(blockId: string): boolean {
+        return Object.values(this.getter(this.ephemeralSessionNodes)).some((node) => node?.data?.blockId === blockId);
+    }
+
+    requestEphemeralSessionMode(mode: EphemeralSessionMode) {
+        this.lastEphemeralSessionMode = mode;
+        this.ephemeralSessionVisibleIntent = true;
+    }
+
+    isEphemeralSessionModeRequested(mode: EphemeralSessionMode): boolean {
+        return this.ephemeralSessionVisibleIntent && this.lastEphemeralSessionMode === mode;
+    }
+
+    cancelEphemeralSessionRequest() {
+        this.ephemeralSessionVisibleIntent = false;
+    }
+
     /**
      * Toggle magnification of a given node.
      * @param nodeId The id of the node that is being magnified.
@@ -1296,6 +1371,10 @@ export class LayoutModel {
             // The ephemeral node is not in the tree, so we need to handle it separately.
             const ephemeralNode = this.getter(this.ephemeralNode);
             if (ephemeralNode?.id === nodeId) {
+                if (this.isEphemeralSessionNode(nodeId)) {
+                    this.hideEphemeralSession();
+                    return;
+                }
                 this.setter(this.ephemeralNode, undefined);
                 this.treeState.focusedNodeId = undefined;
                 this.updateTree(false);
@@ -1346,8 +1425,83 @@ export class LayoutModel {
         this.focusNode(ephemeralNode.id);
     }
 
+    newEphemeralSessionNode(
+        blockId: string,
+        mode: EphemeralSessionMode,
+        position: TabLayoutData["ephemeralPosition"] = "top",
+        view?: string,
+        activate = true
+    ): LayoutNode {
+        const existingNode = this.getEphemeralSessionNode(mode);
+        if (existingNode) {
+            if (existingNode.data.blockId !== blockId) {
+                fireAndForget(() => this.onNodeDelete?.({ blockId }));
+            }
+            if (activate) {
+                this.showEphemeralSession(mode);
+            }
+            return existingNode;
+        }
+
+        const activeEphemeralNode = this.getter(this.ephemeralNode);
+        if (activeEphemeralNode && !this.isEphemeralSessionNode(activeEphemeralNode.id)) {
+            fireAndForget(() => this.closeNode(activeEphemeralNode.id));
+        }
+
+        const sessionNode = newLayoutNode(undefined, undefined, undefined, {
+            blockId,
+            ephemeralPosition: position,
+            ephemeralView: view,
+            ephemeralSessionMode: mode,
+        });
+        this.setter(this.ephemeralSessionNodes, {
+            ...this.getter(this.ephemeralSessionNodes),
+            [mode]: sessionNode,
+        });
+        if (activate) {
+            this.showEphemeralSession(mode);
+        } else {
+            this.updateTree(false);
+        }
+        return sessionNode;
+    }
+
+    showEphemeralSession(mode: EphemeralSessionMode = this.lastEphemeralSessionMode): boolean {
+        const sessionNode = this.getEphemeralSessionNode(mode);
+        if (!sessionNode) {
+            return false;
+        }
+
+        const activeEphemeralNode = this.getter(this.ephemeralNode);
+        if (activeEphemeralNode && !this.isEphemeralSessionNode(activeEphemeralNode.id)) {
+            fireAndForget(() => this.closeNode(activeEphemeralNode.id));
+        }
+        this.requestEphemeralSessionMode(mode);
+        this.setter(this.ephemeralNode, sessionNode);
+        this.updateTree(false);
+        this.focusNode(sessionNode.id);
+        return true;
+    }
+
+    hideEphemeralSession(): boolean {
+        const ephemeralNode = this.getter(this.ephemeralNode);
+        if (!ephemeralNode || !this.isEphemeralSessionNode(ephemeralNode.id)) {
+            return false;
+        }
+        this.cancelEphemeralSessionRequest();
+        this.setter(this.ephemeralNode, undefined);
+        this.treeState.focusedNodeId = undefined;
+        this.updateTree(false);
+        this.setter(this.localTreeStateAtom, { ...this.treeState });
+        this.persistToBackend();
+        return true;
+    }
+
     addEphemeralNodeToLayout() {
         const ephemeralNode = this.getter(this.ephemeralNode);
+        if (!ephemeralNode || this.isEphemeralSessionNode(ephemeralNode.id)) {
+            return;
+        }
         this.setter(this.ephemeralNode, undefined);
         if (this.magnifiedNodeId) {
             this.magnifyNodeToggle(this.magnifiedNodeId, false);
@@ -1369,17 +1523,18 @@ export class LayoutModel {
         addlPropsMap: Record<string, LayoutNodeAdditionalProps>,
         leafs: LayoutNode[],
         magnifiedNodeSizePct: number,
-        boundingRect: Dimensions
+        boundingRect: Dimensions,
+        hidden = false
     ) {
         const position = node.data.ephemeralPosition ?? "center";
         let rect: Dimensions;
         if (position == "top" || position == "bottom") {
-            const isFileWorkspace = node.data.ephemeralView == "fileworkspace";
-            const widthPct = isFileWorkspace
+            const isWorkbench = node.data.ephemeralView == "fileworkspace" || node.data.ephemeralSessionMode != null;
+            const widthPct = isWorkbench
                 ? (boundNumber(this.getter(this.fileWorkspaceWidthAtom), FileWorkspaceMinWidth, 1) ??
                   FileWorkspaceDefaultWidth)
                 : 1;
-            const heightPct = isFileWorkspace
+            const heightPct = isWorkbench
                 ? (boundNumber(this.getter(this.fileWorkspaceHeightAtom), FileWorkspaceMinHeight, 1) ??
                   FileWorkspaceDefaultHeight)
                 : FileWorkspaceDefaultHeight;
@@ -1404,6 +1559,11 @@ export class LayoutModel {
             };
         }
         const transform = setTransform(rect, true, true, "var(--zindex-layout-ephemeral-node)");
+        if (hidden) {
+            transform.visibility = "hidden";
+            transform.pointerEvents = "none";
+            transform.opacity = 0;
+        }
         addlPropsMap[node.id] = { treeKey: "-1", transform };
         leafs.push(node);
     }

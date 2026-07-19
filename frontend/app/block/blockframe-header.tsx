@@ -20,11 +20,12 @@ import {
     WOS,
 } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
-import { uxCloseBlock } from "@/app/store/keymodel";
+import { switchEphemeralWorkbenchMode, uxCloseBlock } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { useWaveEnv } from "@/app/waveenv/waveenv";
 import { IconButton } from "@/element/iconbutton";
+import type { EphemeralSessionMode } from "@/layout/index";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { cn, makeIconClass } from "@/util/util";
@@ -43,6 +44,7 @@ function handleHeaderContextMenu(
     e.preventDefault();
     e.stopPropagation();
     const magnified = globalStore.get(nodeModel.isMagnified);
+    const ephemeralSession = globalStore.get(nodeModel.isEphemeralSession);
     const useTermHeader = viewModel?.useTermHeader ? globalStore.get(viewModel.useTermHeader) : false;
     const titleKey = getBlockTitleMetaKey(useTermHeader);
     const blockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", blockId));
@@ -59,21 +61,35 @@ function handleHeaderContextMenu(
                 });
             },
         },
-        {
-            label: magnified ? "Un-Magnify Block" : "Magnify Block",
-            click: () => {
-                nodeModel.toggleMagnify();
-            },
-        },
-        { type: "separator" },
-        {
-            label: "Copy BlockId",
-            click: () => {
-                navigator.clipboard.writeText(blockId);
-            },
-        },
     ];
-    const extraItems = viewModel?.getSettingsMenuItems?.();
+    if (!ephemeralSession) {
+        menu.push(
+            {
+                label: magnified ? "Un-Magnify Block" : "Magnify Block",
+                click: () => {
+                    nodeModel.toggleMagnify();
+                },
+            },
+            { type: "separator" }
+        );
+    }
+    menu.push({
+        label: "Copy BlockId",
+        click: () => {
+            navigator.clipboard.writeText(blockId);
+        },
+    });
+    let extraItems = viewModel
+        ?.getSettingsMenuItems?.()
+        ?.filter(
+            (item) => !ephemeralSession || (item.label !== "Split Horizontally" && item.label !== "Split Vertically")
+        );
+    if (ephemeralSession) {
+        extraItems = extraItems?.slice();
+        while (extraItems?.[0]?.type === "separator") {
+            extraItems.shift();
+        }
+    }
     if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
     menu.push(
         { type: "separator" },
@@ -129,6 +145,44 @@ const HeaderTextElems = React.memo(({ viewModel, blockId, preview, error }: Head
 });
 HeaderTextElems.displayName = "HeaderTextElems";
 
+const ephemeralModes: Array<{
+    mode: EphemeralSessionMode;
+    label: string;
+    icon: string;
+}> = [
+    { mode: "files", label: "Files", icon: "folder-tree" },
+    { mode: "terminal", label: "Terminal", icon: "terminal" },
+    { mode: "browser", label: "Browser", icon: "globe" },
+];
+
+const EphemeralModeSwitcher = React.memo(({ nodeModel }: { nodeModel: NodeModel }) => {
+    const activeMode = nodeModel.ephemeralSessionMode;
+    return (
+        <div className="ephemeral-workbench-mode-switcher" role="tablist" aria-label="Workbench mode">
+            {ephemeralModes.map(({ mode, label, icon }) => (
+                <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeMode === mode}
+                    className={cn("ephemeral-workbench-mode", activeMode === mode && "active")}
+                    title={label}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        util.fireAndForget(() => switchEphemeralWorkbenchMode(mode));
+                    }}
+                >
+                    <i className={makeIconClass(icon, true)} />
+                    <span>{label}</span>
+                </button>
+            ))}
+        </div>
+    );
+});
+EphemeralModeSwitcher.displayName = "EphemeralModeSwitcher";
+
 type HeaderEndIconsProps = {
     viewModel: ViewModel;
     nodeModel: NodeModel;
@@ -140,6 +194,7 @@ const HeaderEndIcons = React.memo(({ viewModel, nodeModel, blockId }: HeaderEndI
     const endIconButtons = util.useAtomValueSafe(viewModel?.endIconButtons);
     const magnified = jotai.useAtomValue(nodeModel.isMagnified);
     const ephemeral = jotai.useAtomValue(nodeModel.isEphemeral);
+    const ephemeralSession = jotai.useAtomValue(nodeModel.isEphemeralSession);
     const numLeafs = jotai.useAtomValue(nodeModel.numLeafs);
     const magnifyDisabled = numLeafs <= 1;
     const showSplitButtons = jotai.useAtomValue(blockEnv.getSettingsKeyAtom("term:showsplitbuttons"));
@@ -149,7 +204,7 @@ const HeaderEndIcons = React.memo(({ viewModel, nodeModel, blockId }: HeaderEndI
     if (endIconButtons && endIconButtons.length > 0) {
         endIconsElem.push(...endIconButtons.map((button, idx) => <IconButton key={idx} decl={button} />));
     }
-    if (showSplitButtons && viewModel?.viewType === "term") {
+    if (showSplitButtons && viewModel?.viewType === "term" && !ephemeralSession) {
         const splitHorizontalDecl: IconButtonDecl = {
             elemtype: "iconbutton",
             icon: "columns",
@@ -188,7 +243,7 @@ const HeaderEndIcons = React.memo(({ viewModel, nodeModel, blockId }: HeaderEndI
         click: (e) => handleHeaderContextMenu(e, blockId, viewModel, nodeModel, blockEnv),
     };
     endIconsElem.push(<IconButton key="settings" decl={settingsDecl} className="block-frame-settings" />);
-    if (ephemeral) {
+    if (ephemeral && !ephemeralSession) {
         const addToLayoutDecl: IconButtonDecl = {
             elemtype: "iconbutton",
             icon: "circle-plus",
@@ -249,6 +304,7 @@ const BlockFrame_Header = ({
     const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
     const iconColor = jotai.useAtomValue(waveEnv.getBlockMetaKeyAtom(nodeModel.blockId, "icon:color"));
     const dragHandleRef = preview ? null : nodeModel.dragHandleRef;
+    const ephemeralSession = jotai.useAtomValue(nodeModel.isEphemeralSession);
     const isTerminalBlock = metaView === "term";
     viewName = metaFrameTitle ?? viewName;
     viewIconUnion = metaFrameIcon ?? viewIconUnion;
@@ -279,6 +335,7 @@ const BlockFrame_Header = ({
                     </div>
                 </>
             )}
+            {ephemeralSession && <EphemeralModeSwitcher nodeModel={nodeModel} />}
             {manageConnection && (
                 <ConnectionButton
                     ref={connBtnRef}

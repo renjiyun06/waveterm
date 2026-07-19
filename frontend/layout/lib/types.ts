@@ -11,6 +11,8 @@ export enum NavigateDirection {
     Left = 3,
 }
 
+export type EphemeralSessionMode = "files" | "terminal" | "browser";
+
 export function navigateDirectionToString(dir: NavigateDirection): string {
     switch (dir) {
         case NavigateDirection.Up:
@@ -393,6 +395,8 @@ export interface NodeModel {
     isMagnified: Atom<boolean>;
     anyMagnified: Atom<boolean>;
     isEphemeral: Atom<boolean>;
+    isEphemeralSession: Atom<boolean>;
+    ephemeralSessionMode?: EphemeralSessionMode;
     ready: Atom<boolean>;
     disablePointerEvents: Atom<boolean>;
     toggleMagnify: () => void;

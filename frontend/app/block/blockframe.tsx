@@ -106,6 +106,7 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
     const connModalOpen = jotai.useAtomValue(changeConnModalAtom);
     const isMagnified = jotai.useAtomValue(nodeModel.isMagnified);
     const isEphemeral = jotai.useAtomValue(nodeModel.isEphemeral);
+    const isEphemeralSession = jotai.useAtomValue(nodeModel.isEphemeralSession);
     const [magnifiedBlockBlurAtom] = React.useState(() =>
         waveEnv.getSettingsKeyAtom("window:magnifiedblockblurprimarypx")
     );
@@ -167,7 +168,8 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
         <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} />
     );
     const headerElemNoView = React.cloneElement(headerElem, { viewModel: null });
-    const blockOpacity = metaView == "fileworkspace" ? fileWorkspaceOpacity : magnifiedBlockOpacity;
+    const blockOpacity =
+        metaView == "fileworkspace" || isEphemeralSession ? fileWorkspaceOpacity : magnifiedBlockOpacity;
     return (
         <div
             className={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
@@ -220,10 +222,9 @@ const BlockFrame_Default = React.memo(BlockFrame_Default_Component) as typeof Bl
 
 const BlockFrame = React.memo((props: BlockFrameProps) => {
     const waveEnv = useWaveEnv<BlockEnv>();
-    const tabModel = useTabModel();
     const blockId = props.nodeModel.blockId;
     const blockIsNull = jotai.useAtomValue(waveEnv.wos.isWaveObjectNullAtom(makeORef("block", blockId)));
-    const numBlocks = jotai.useAtomValue(tabModel.tabNumBlocksAtom);
+    const numBlocks = jotai.useAtomValue(props.nodeModel.numLeafs);
     if (!blockId || blockIsNull) {
         return null;
     }
