@@ -31,19 +31,25 @@ const (
 var defaultRegistry = NewRegistry()
 
 type Message struct {
-	Id        string `json:"id"`
-	Role      string `json:"role"`
-	Kind      string `json:"kind,omitempty"`
-	ToolType  string `json:"toolType,omitempty"`
-	Title     string `json:"title,omitempty"`
-	Text      string `json:"text"`
-	Input     string `json:"input,omitempty"`
-	Output    string `json:"output,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
-	CreatedAt int64  `json:"createdAt"`
+	Id        string     `json:"id"`
+	Role      string     `json:"role"`
+	Kind      string     `json:"kind,omitempty"`
+	ToolType  string     `json:"toolType,omitempty"`
+	Title     string     `json:"title,omitempty"`
+	Text      string     `json:"text"`
+	Plan      []PlanStep `json:"plan,omitempty"`
+	Input     string     `json:"input,omitempty"`
+	Output    string     `json:"output,omitempty"`
+	Status    string     `json:"status,omitempty"`
+	Truncated bool       `json:"truncated,omitempty"`
+	CreatedAt int64      `json:"createdAt"`
 
 	summaryIndex int
+}
+
+type PlanStep struct {
+	Step   string `json:"step"`
+	Status string `json:"status"`
 }
 
 type Session struct {
@@ -140,11 +146,6 @@ type remoteFileChange struct {
 	Path string          `json:"path"`
 	Kind json.RawMessage `json:"kind"`
 	Diff string          `json:"diff"`
-}
-
-type remotePlanStep struct {
-	Step   string `json:"step"`
-	Status string `json:"status"`
 }
 
 func NewRegistry() *Registry {
@@ -397,6 +398,9 @@ func (r *Registry) pruneLocked() {
 
 func cloneSession(session Session) Session {
 	session.Messages = append(make([]Message, 0, len(session.Messages)), session.Messages...)
+	for index := range session.Messages {
+		session.Messages[index].Plan = append([]PlanStep(nil), session.Messages[index].Plan...)
+	}
 	return session
 }
 
@@ -586,9 +590,9 @@ func applyNotification(session *Session, data []byte) error {
 		}
 	case "turn/plan/updated":
 		var params struct {
-			TurnId      string           `json:"turnId"`
-			Explanation *string          `json:"explanation"`
-			Plan        []remotePlanStep `json:"plan"`
+			TurnId      string     `json:"turnId"`
+			Explanation *string    `json:"explanation"`
+			Plan        []PlanStep `json:"plan"`
 		}
 		if err := json.Unmarshal(envelope.Params, &params); err != nil {
 			return err
@@ -783,7 +787,14 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 	default:
 		return
 	}
-	message.Input, message.Truncated = limitActivityDetail(message.Input)
+	if message.Kind == "reasoning" || message.Kind == "plan" {
+		var textTruncated bool
+		message.Text, textTruncated = limitActivityDetail(message.Text)
+		message.Truncated = message.Truncated || textTruncated
+	}
+	var inputTruncated bool
+	message.Input, inputTruncated = limitActivityDetail(message.Input)
+	message.Truncated = message.Truncated || inputTruncated
 	var outputTruncated bool
 	message.Output, outputTruncated = limitActivityDetail(message.Output)
 	message.Truncated = message.Truncated || outputTruncated
@@ -855,21 +866,26 @@ func appendReasoningDelta(session *Session, itemId string, delta string, summary
 		return
 	}
 	if message := findMessage(session, itemId); message != nil {
+		separator := ""
 		if message.Text != "" && summaryIndex > message.summaryIndex {
-			message.Text += "\n\n"
+			separator = "\n\n"
 		}
-		message.Text += delta
+		var truncated bool
+		message.Text, truncated = appendActivityDetail(message.Text, separator+delta)
+		message.Truncated = message.Truncated || truncated
 		message.summaryIndex = summaryIndex
 		message.Status = "streaming"
 		return
 	}
+	text, truncated := limitActivityDetail(delta)
 	session.Messages = append(session.Messages, Message{
 		Id:           itemId,
 		Role:         "assistant",
 		Kind:         "reasoning",
 		Title:        "思考",
-		Text:         delta,
+		Text:         text,
 		Status:       "streaming",
+		Truncated:    truncated,
 		CreatedAt:    time.Now().UnixMilli(),
 		summaryIndex: summaryIndex,
 	})
@@ -880,17 +896,21 @@ func appendPlanDelta(session *Session, itemId string, delta string) {
 		return
 	}
 	if message := findMessage(session, itemId); message != nil {
-		message.Text += delta
+		var truncated bool
+		message.Text, truncated = appendActivityDetail(message.Text, delta)
+		message.Truncated = message.Truncated || truncated
 		message.Status = "streaming"
 		return
 	}
+	text, truncated := limitActivityDetail(delta)
 	session.Messages = append(session.Messages, Message{
 		Id:        itemId,
 		Role:      "assistant",
 		Kind:      "plan",
 		Title:     "计划",
-		Text:      delta,
+		Text:      text,
 		Status:    "streaming",
+		Truncated: truncated,
 		CreatedAt: time.Now().UnixMilli(),
 	})
 }
@@ -920,33 +940,30 @@ func appendToolOutput(session *Session, itemId string, delta string, toolType st
 	})
 }
 
-func upsertTurnPlan(session *Session, turnId string, explanation *string, steps []remotePlanStep) {
+func upsertTurnPlan(session *Session, turnId string, explanation *string, steps []PlanStep) {
 	if turnId == "" || (explanation == nil && len(steps) == 0) {
 		return
 	}
-	parts := make([]string, 0, len(steps)+1)
+	text := ""
 	if explanation != nil && strings.TrimSpace(*explanation) != "" {
-		parts = append(parts, strings.TrimSpace(*explanation))
+		text = strings.TrimSpace(*explanation)
 	}
+	text, truncated := limitActivityDetail(text)
 	status := "completed"
 	for _, step := range steps {
-		marker := "○"
-		switch step.Status {
-		case "inProgress":
-			marker = "◉"
+		if step.Status != "completed" {
 			status = "streaming"
-		case "completed":
-			marker = "✓"
 		}
-		parts = append(parts, marker+" "+step.Step)
 	}
 	upsertMessage(session, Message{
 		Id:        "turn-plan:" + turnId,
 		Role:      "assistant",
 		Kind:      "plan",
 		Title:     "计划",
-		Text:      strings.Join(parts, "\n"),
+		Text:      text,
+		Plan:      append([]PlanStep(nil), steps...),
 		Status:    status,
+		Truncated: truncated,
 		CreatedAt: time.Now().UnixMilli(),
 	})
 }

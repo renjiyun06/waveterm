@@ -281,3 +281,47 @@ func TestStreamingReasoningAndToolOutputUpdateTimeline(t *testing.T) {
 		t.Fatalf("unexpected command stream: %#v", session.Messages[1])
 	}
 }
+
+func TestTurnPlanKeepsStructuredSteps(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	apply := func(plan string) {
+		t.Helper()
+		if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{
+			BridgeId: "bridge-1",
+			BlockId:  "block-12345678",
+			Kind:     "notification",
+			Data:     `{"method":"turn/plan/updated","params":{"turnId":"turn-1","explanation":"先验证再修改","plan":` + plan + `}}`,
+		}); err != nil {
+			t.Fatalf("plan update: %v", err)
+		}
+	}
+
+	apply(`[{"step":"检查事件","status":"completed"},{"step":"调整界面","status":"inProgress"},{"step":"运行测试","status":"pending"}]`)
+	session, ok := registry.Get("block-12345678")
+	if !ok || len(session.Messages) != 1 {
+		t.Fatalf("unexpected plan timeline: %#v", session.Messages)
+	}
+	message := session.Messages[0]
+	if message.Kind != "plan" || message.Text != "先验证再修改" || message.Status != "streaming" {
+		t.Fatalf("unexpected plan message: %#v", message)
+	}
+	if len(message.Plan) != 3 ||
+		message.Plan[0].Status != "completed" ||
+		message.Plan[1].Status != "inProgress" ||
+		message.Plan[2].Status != "pending" {
+		t.Fatalf("structured plan was not preserved: %#v", message.Plan)
+	}
+
+	session.Messages[0].Plan[0].Step = "mutated clone"
+	again, _ := registry.Get("block-12345678")
+	if again.Messages[0].Plan[0].Step != "检查事件" {
+		t.Fatal("session clone shared its plan step backing array")
+	}
+
+	apply(`[{"step":"检查事件","status":"completed"},{"step":"调整界面","status":"completed"},{"step":"运行测试","status":"completed"}]`)
+	completed, _ := registry.Get("block-12345678")
+	if completed.Messages[0].Status != "completed" {
+		t.Fatalf("completed plan status = %q", completed.Messages[0].Status)
+	}
+}

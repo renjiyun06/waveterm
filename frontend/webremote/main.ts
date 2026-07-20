@@ -3,6 +3,11 @@
 
 import "./style.css";
 
+type PlanStep = {
+    step: string;
+    status: "pending" | "inProgress" | "completed";
+};
+
 type ChatMessage = {
     id: string;
     role: "user" | "assistant";
@@ -10,6 +15,7 @@ type ChatMessage = {
     toolType?: string;
     title?: string;
     text: string;
+    plan?: PlanStep[];
     input?: string;
     output?: string;
     status?: string;
@@ -235,6 +241,40 @@ const toolIcon = (toolType?: string): string => {
     }
 };
 
+const createDisclosureIcon = (): HTMLElement => {
+    const icon = document.createElement("span");
+    icon.className = "disclosure-icon";
+    icon.setAttribute("aria-hidden", "true");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "m9 6 6 6-6 6");
+    svg.append(path);
+    icon.append(svg);
+    return icon;
+};
+
+const createPlanIcon = (): HTMLElement => {
+    const icon = document.createElement("span");
+    icon.className = "plan-icon";
+    icon.setAttribute("aria-hidden", "true");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("focusable", "false");
+    for (const y of [6, 12, 18]) {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", "5");
+        circle.setAttribute("cy", String(y));
+        circle.setAttribute("r", "1.25");
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        line.setAttribute("d", `M9 ${y}h10`);
+        svg.append(circle, line);
+    }
+    icon.append(svg);
+    return icon;
+};
+
 const renderConversationMessage = (article: HTMLElement, message: ChatMessage) => {
     if (article.dataset.layout !== "message") {
         article.replaceChildren();
@@ -253,28 +293,172 @@ const renderConversationMessage = (article: HTMLElement, message: ChatMessage) =
     if (bubble.textContent !== text) bubble.textContent = text;
 };
 
-const renderNarrativeItem = (article: HTMLElement, message: ChatMessage, kind: "reasoning" | "plan") => {
-    if (article.dataset.layout !== kind) {
+const renderReasoningItem = (article: HTMLElement, message: ChatMessage) => {
+    if (article.dataset.layout !== "reasoning") {
         article.replaceChildren();
-        const heading = document.createElement("div");
-        heading.className = "timeline-label";
-        const dot = document.createElement("span");
-        dot.className = "timeline-label-dot";
-        const label = document.createElement("span");
-        label.className = "timeline-label-text";
-        heading.append(dot, label);
+        const details = document.createElement("details");
+        details.className = "reasoning-card";
+        const summary = document.createElement("summary");
+        const mark = document.createElement("span");
+        mark.className = "reasoning-mark";
+        mark.textContent = "✦";
+        const copy = document.createElement("span");
+        copy.className = "reasoning-summary-copy";
+        const title = document.createElement("span");
+        title.className = "reasoning-title";
+        const preview = document.createElement("span");
+        preview.className = "reasoning-preview";
+        copy.append(title, preview);
+        const state = document.createElement("span");
+        state.className = "tool-state";
+        summary.append(mark, copy, state, createDisclosureIcon());
+        const body = document.createElement("div");
+        body.className = "reasoning-detail";
         const content = document.createElement("div");
-        content.className = "timeline-copy";
-        article.append(heading, content);
-        article.dataset.layout = kind;
+        content.className = "reasoning-content";
+        const truncated = document.createElement("div");
+        truncated.className = "tool-truncated";
+        truncated.textContent = "思考摘要过长，已保留开头和末尾。";
+        body.append(content, truncated);
+        details.append(summary, body);
+        summary.addEventListener("click", (event) => {
+            if (details.classList.contains("no-details")) event.preventDefault();
+        });
+        article.append(details);
+        article.dataset.layout = "reasoning";
     }
-    article.className = `timeline-item ${kind} ${activityStatusClass(message.status)}`;
-    article.querySelector<HTMLElement>(".timeline-label-text")!.textContent =
-        message.title || (kind === "reasoning" ? "思考" : "计划");
-    const fallback = kind === "reasoning" ? "正在思考…" : "正在整理计划…";
-    const content = article.querySelector<HTMLElement>(".timeline-copy")!;
-    const text = message.text || fallback;
-    if (content.textContent !== text) content.textContent = text;
+    article.className = "timeline-item reasoning";
+    const details = article.querySelector<HTMLDetailsElement>(".reasoning-card")!;
+    details.className = `reasoning-card ${activityStatusClass(message.status)}`;
+    details.querySelector<HTMLElement>(".reasoning-title")!.textContent = message.title || "思考";
+    const preview = message.text.replace(/\s+/g, " ").trim();
+    details.querySelector<HTMLElement>(".reasoning-preview")!.textContent =
+        preview || (message.status === "inProgress" || message.status === "streaming" ? "正在思考…" : "没有思考摘要");
+    const state = details.querySelector<HTMLElement>(".tool-state")!;
+    state.className = `tool-state ${activityStatusClass(message.status)}`;
+    state.textContent = activityStatusLabel(message.status);
+    details.querySelector<HTMLElement>(".reasoning-content")!.textContent = message.text;
+    const truncated = details.querySelector<HTMLElement>(".tool-truncated")!;
+    truncated.hidden = !message.truncated;
+    const hasDetails = Boolean(message.text || message.truncated);
+    details.classList.toggle("no-details", !hasDetails);
+    if (!hasDetails) details.open = false;
+};
+
+type PlanView = {
+    explanation: string;
+    steps: PlanStep[];
+};
+
+const planView = (message: ChatMessage): PlanView => {
+    if (Array.isArray(message.plan) && message.plan.length > 0) {
+        return {
+            explanation: message.text.trim(),
+            steps: message.plan.filter((step) => step.step.trim() !== ""),
+        };
+    }
+    const explanation: string[] = [];
+    const steps: PlanStep[] = [];
+    for (const rawLine of message.text.split("\n")) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const match = line.match(/^(?:[-*•]|\d+[.)])\s+(?:\[([xX ])\]\s*)?(.*)$/);
+        if (!match || !match[2].trim()) {
+            explanation.push(line);
+            continue;
+        }
+        steps.push({
+            step: match[2].trim(),
+            status: match[1]?.toLowerCase() === "x" ? "completed" : "pending",
+        });
+    }
+    return { explanation: explanation.join("\n"), steps };
+};
+
+const planStepLabel = (status: PlanStep["status"]): string => {
+    if (status === "completed") return "已完成";
+    if (status === "inProgress") return "进行中";
+    return "待处理";
+};
+
+const renderPlanItem = (article: HTMLElement, message: ChatMessage) => {
+    if (article.dataset.layout !== "plan") {
+        article.replaceChildren();
+        const card = document.createElement("section");
+        card.className = "plan-card";
+        const header = document.createElement("header");
+        header.className = "plan-header";
+        const heading = document.createElement("div");
+        heading.className = "plan-heading";
+        const headingCopy = document.createElement("div");
+        headingCopy.className = "plan-heading-copy";
+        const title = document.createElement("div");
+        title.className = "plan-title";
+        const summary = document.createElement("div");
+        summary.className = "plan-summary";
+        headingCopy.append(title, summary);
+        heading.append(createPlanIcon(), headingCopy);
+        const progress = document.createElement("span");
+        progress.className = "plan-progress";
+        header.append(heading, progress);
+        const explanation = document.createElement("div");
+        explanation.className = "plan-explanation";
+        const steps = document.createElement("ol");
+        steps.className = "plan-steps";
+        const truncated = document.createElement("div");
+        truncated.className = "tool-truncated";
+        truncated.textContent = "计划内容过长，已保留开头和末尾。";
+        card.append(header, explanation, steps, truncated);
+        article.append(card);
+        article.dataset.layout = "plan";
+    }
+
+    article.className = `timeline-item plan ${activityStatusClass(message.status)}`;
+    const card = article.querySelector<HTMLElement>(".plan-card")!;
+    card.className = `plan-card ${activityStatusClass(message.status)}`;
+    const view = planView(message);
+    const completed = view.steps.filter((step) => step.status === "completed").length;
+    const activeStep = view.steps.find((step) => step.status === "inProgress");
+    card.querySelector<HTMLElement>(".plan-title")!.textContent = message.title || "计划";
+    card.querySelector<HTMLElement>(".plan-summary")!.textContent = activeStep
+        ? `当前：${activeStep.step}`
+        : view.steps.length > 0 && completed === view.steps.length
+          ? "全部步骤已完成"
+          : view.steps.length > 0
+            ? `${view.steps.length - completed} 项待处理`
+            : message.status === "streaming"
+              ? "正在整理计划…"
+              : "计划内容";
+
+    const progress = card.querySelector<HTMLElement>(".plan-progress")!;
+    progress.hidden = view.steps.length === 0;
+    progress.textContent = `${completed} / ${view.steps.length}`;
+    const explanation = card.querySelector<HTMLElement>(".plan-explanation")!;
+    explanation.hidden = view.explanation === "";
+    explanation.classList.toggle("standalone", view.steps.length === 0);
+    explanation.textContent = view.explanation;
+
+    const list = card.querySelector<HTMLOListElement>(".plan-steps")!;
+    list.hidden = view.steps.length === 0;
+    list.replaceChildren();
+    for (const step of view.steps) {
+        const item = document.createElement("li");
+        item.className = `plan-step ${step.status}`;
+        const marker = document.createElement("span");
+        marker.className = "plan-step-marker";
+        marker.setAttribute("aria-hidden", "true");
+        const text = document.createElement("span");
+        text.className = "plan-step-text";
+        text.textContent = step.step;
+        const state = document.createElement("span");
+        state.className = "plan-step-state";
+        state.textContent = planStepLabel(step.status);
+        item.append(marker, text, state);
+        list.append(item);
+    }
+
+    const truncated = card.querySelector<HTMLElement>(".tool-truncated")!;
+    truncated.hidden = !message.truncated;
 };
 
 const createToolSection = (name: string, label: string): HTMLElement => {
@@ -306,10 +490,7 @@ const renderToolItem = (article: HTMLElement, message: ChatMessage) => {
         copy.append(title, preview);
         const state = document.createElement("span");
         state.className = "tool-state";
-        const chevron = document.createElement("span");
-        chevron.className = "tool-chevron";
-        chevron.textContent = "⌄";
-        summary.append(icon, copy, state, chevron);
+        summary.append(icon, copy, state, createDisclosureIcon());
         const body = document.createElement("div");
         body.className = "tool-detail-body";
         body.append(createToolSection("input", "调用信息"), createToolSection("output", "结果与输出"));
@@ -395,8 +576,10 @@ const renderMessages = (session?: CodexSession) => {
         const kind = message.kind ?? "message";
         if (kind === "tool") {
             renderToolItem(article, message);
-        } else if (kind === "reasoning" || kind === "plan") {
-            renderNarrativeItem(article, message, kind);
+        } else if (kind === "reasoning") {
+            renderReasoningItem(article, message);
+        } else if (kind === "plan") {
+            renderPlanItem(article, message);
         } else {
             renderConversationMessage(article, message);
         }
@@ -445,7 +628,10 @@ const render = () => {
 const applySessions = (nextSessions?: RawCodexSession[] | null) => {
     sessions = (Array.isArray(nextSessions) ? nextSessions : []).map((session) => ({
         ...session,
-        messages: Array.isArray(session.messages) ? session.messages : [],
+        messages: (Array.isArray(session.messages) ? session.messages : []).map((message) => ({
+            ...message,
+            plan: Array.isArray(message.plan) ? message.plan : [],
+        })),
     }));
     render();
 };

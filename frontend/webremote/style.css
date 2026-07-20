@@ -377,50 +377,7 @@ textarea::placeholder {
     margin: 0 0 18px;
 }
 
-.timeline-label {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin: 0 0 7px 2px;
-    color: #8390a4;
-    font-size: 10px;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.timeline-label-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #7584a0;
-}
-
-.timeline-item.running .timeline-label-dot {
-    background: #91a9ff;
-    box-shadow: 0 0 9px rgba(139, 164, 255, 0.55);
-}
-
-.timeline-copy {
-    max-width: 760px;
-    padding: 10px 13px;
-    border-left: 2px solid rgba(132, 151, 196, 0.24);
-    color: #aeb8c8;
-    background: linear-gradient(90deg, rgba(106, 124, 168, 0.075), transparent 82%);
-    font-size: 12px;
-    line-height: 1.68;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-}
-
-.timeline-item.plan .timeline-copy {
-    border: 1px solid rgba(125, 150, 229, 0.14);
-    border-left: 2px solid rgba(139, 164, 255, 0.45);
-    border-radius: 8px;
-    color: #bec8dc;
-    background: rgba(82, 105, 178, 0.07);
-}
-
+.reasoning-card,
 .tool-card {
     overflow: hidden;
     border: 1px solid rgba(142, 156, 181, 0.14);
@@ -428,6 +385,17 @@ textarea::placeholder {
     background: rgba(18, 25, 36, 0.72);
 }
 
+.reasoning-card {
+    border-color: rgba(128, 145, 181, 0.13);
+    background: rgba(16, 22, 32, 0.56);
+}
+
+.reasoning-card[open],
+.tool-card[open] {
+    border-color: rgba(141, 159, 202, 0.22);
+}
+
+.reasoning-card > summary,
 .tool-card > summary {
     min-height: 52px;
     display: flex;
@@ -439,23 +407,28 @@ textarea::placeholder {
     user-select: none;
 }
 
+.reasoning-card > summary::-webkit-details-marker,
 .tool-card > summary::-webkit-details-marker {
     display: none;
 }
 
+.reasoning-card > summary:hover,
 .tool-card > summary:hover {
     background: rgba(255, 255, 255, 0.025);
 }
 
+.reasoning-card > summary:focus-visible,
 .tool-card > summary:focus-visible {
     outline: 2px solid rgba(139, 164, 255, 0.45);
     outline-offset: -2px;
 }
 
+.reasoning-card.no-details > summary,
 .tool-card.no-details > summary {
     cursor: default;
 }
 
+.reasoning-mark,
 .tool-icon {
     width: 29px;
     height: 29px;
@@ -473,6 +446,20 @@ textarea::placeholder {
         monospace;
 }
 
+.reasoning-mark {
+    color: #a9b5dc;
+    border-color: rgba(154, 170, 213, 0.15);
+    background: rgba(119, 139, 191, 0.07);
+    font-family: inherit;
+    font-size: 12px;
+}
+
+.reasoning-card.running .reasoning-mark {
+    color: #bcc9fa;
+    border-color: rgba(139, 164, 255, 0.25);
+    box-shadow: 0 0 14px rgba(114, 143, 241, 0.1);
+}
+
 .tool-card.file .tool-icon {
     color: #7fd2ae;
     border-color: rgba(105, 201, 158, 0.17);
@@ -485,6 +472,7 @@ textarea::placeholder {
     background: rgba(74, 143, 184, 0.08);
 }
 
+.reasoning-summary-copy,
 .tool-summary-copy {
     min-width: 0;
     display: grid;
@@ -492,6 +480,7 @@ textarea::placeholder {
     gap: 3px;
 }
 
+.reasoning-title,
 .tool-title {
     overflow: hidden;
     color: #c5cedd;
@@ -501,6 +490,7 @@ textarea::placeholder {
     white-space: nowrap;
 }
 
+.reasoning-preview,
 .tool-preview {
     display: -webkit-box;
     overflow: hidden;
@@ -510,6 +500,10 @@ textarea::placeholder {
     overflow-wrap: anywhere;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+}
+
+.reasoning-preview {
+    -webkit-line-clamp: 1;
 }
 
 .tool-card.command .tool-preview,
@@ -537,24 +531,68 @@ textarea::placeholder {
     background: rgba(211, 79, 72, 0.11);
 }
 
-.tool-chevron {
+.disclosure-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
     flex: none;
+    border-radius: 6px;
     color: #68758a;
-    font-size: 12px;
-    transition: transform 140ms ease;
+    transform-origin: 50% 50%;
+    transition:
+        color 140ms ease,
+        background 140ms ease,
+        transform 140ms ease;
 }
 
-.tool-card[open] .tool-chevron {
-    transform: rotate(180deg);
+.disclosure-icon svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
-.tool-card.no-details .tool-chevron {
+.reasoning-card > summary:hover .disclosure-icon,
+.tool-card > summary:hover .disclosure-icon {
+    color: #94a3ba;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.reasoning-card[open] > summary .disclosure-icon,
+.tool-card[open] > summary .disclosure-icon {
+    transform: rotate(90deg);
+}
+
+.reasoning-card.no-details .disclosure-icon,
+.tool-card.no-details .disclosure-icon {
     visibility: hidden;
 }
 
+.reasoning-detail,
 .tool-detail-body {
     padding: 0 12px 12px 50px;
     border-top: 1px solid rgba(142, 156, 181, 0.1);
+}
+
+.reasoning-content {
+    max-height: min(48vh, 520px);
+    margin-top: 11px;
+    padding: 11px 12px;
+    overflow: auto;
+    border: 1px solid rgba(142, 156, 181, 0.09);
+    border-radius: 8px;
+    color: #b8c2d2;
+    background: rgba(4, 8, 14, 0.28);
+    font-size: 12px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
 }
 
 .tool-detail-section {
@@ -593,6 +631,205 @@ textarea::placeholder {
     margin-top: 9px;
     color: #a7906c;
     font-size: 9px;
+}
+
+.plan-card {
+    overflow: hidden;
+    border: 1px solid rgba(126, 150, 224, 0.18);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(91, 115, 190, 0.09), transparent 52%), rgba(17, 24, 36, 0.72);
+}
+
+.plan-card.running {
+    border-color: rgba(130, 155, 235, 0.3);
+    box-shadow: inset 2px 0 rgba(139, 164, 255, 0.54);
+}
+
+.plan-header {
+    min-height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 11px 13px;
+    border-bottom: 1px solid rgba(131, 151, 198, 0.11);
+}
+
+.plan-heading {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.plan-icon {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border: 1px solid rgba(139, 164, 255, 0.2);
+    border-radius: 9px;
+    color: #aabaf0;
+    background: rgba(96, 121, 205, 0.1);
+}
+
+.plan-icon svg {
+    width: 17px;
+    height: 17px;
+    overflow: visible;
+}
+
+.plan-icon circle {
+    fill: currentColor;
+}
+
+.plan-icon path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+}
+
+.plan-heading-copy {
+    min-width: 0;
+}
+
+.plan-title {
+    color: #d0d8e7;
+    font-size: 12px;
+    font-weight: 660;
+}
+
+.plan-summary {
+    overflow: hidden;
+    margin-top: 3px;
+    color: #8490a4;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plan-progress {
+    flex: none;
+    padding: 4px 8px;
+    border: 1px solid rgba(139, 164, 255, 0.13);
+    border-radius: 999px;
+    color: #aebcf0;
+    background: rgba(94, 119, 205, 0.09);
+    font:
+        600 9px/1.1 ui-monospace,
+        SFMono-Regular,
+        Consolas,
+        monospace;
+}
+
+.plan-explanation {
+    margin: 12px 14px 2px;
+    color: #9da9bb;
+    font-size: 11px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.plan-explanation.standalone {
+    margin-bottom: 13px;
+    padding: 10px 11px;
+    border-radius: 8px;
+    color: #b5c0d0;
+    background: rgba(5, 9, 15, 0.22);
+}
+
+.plan-steps {
+    display: grid;
+    gap: 2px;
+    margin: 7px 0 0;
+    padding: 6px 10px 10px;
+    list-style: none;
+}
+
+.plan-step {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    color: #aab4c4;
+}
+
+.plan-step.inProgress {
+    color: #d2daec;
+    background: rgba(101, 129, 221, 0.09);
+}
+
+.plan-step.completed {
+    color: #788599;
+}
+
+.plan-step-marker {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #536075;
+    border-radius: 50%;
+}
+
+.plan-step.inProgress .plan-step-marker {
+    border-color: #8da6fb;
+    box-shadow: 0 0 9px rgba(121, 151, 247, 0.22);
+}
+
+.plan-step.inProgress .plan-step-marker::after {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #9db2fa;
+    content: "";
+}
+
+.plan-step.completed .plan-step-marker {
+    border-color: rgba(104, 191, 151, 0.55);
+    background: rgba(79, 165, 125, 0.14);
+}
+
+.plan-step.completed .plan-step-marker::after {
+    width: 4px;
+    height: 7px;
+    border: solid #79cba5;
+    border-width: 0 1.5px 1.5px 0;
+    content: "";
+    transform: translateY(-1px) rotate(45deg);
+}
+
+.plan-step-text {
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.plan-step.completed .plan-step-text {
+    text-decoration: line-through;
+    text-decoration-color: rgba(121, 135, 155, 0.42);
+}
+
+.plan-step-state {
+    color: #677489;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.plan-step.inProgress .plan-step-state {
+    color: #9fb2f4;
+}
+
+.plan-card > .tool-truncated {
+    margin: 0 14px 12px;
 }
 
 .empty-state {
@@ -895,27 +1132,68 @@ textarea::placeholder {
         margin-bottom: 15px;
     }
 
-    .timeline-copy {
-        padding: 9px 11px;
-    }
-
+    .reasoning-card > summary,
     .tool-card > summary {
         min-height: 49px;
         gap: 8px;
         padding: 8px 9px;
     }
 
+    .disclosure-icon {
+        width: 22px;
+        height: 22px;
+    }
+
     .tool-state {
         padding-inline: 6px;
     }
 
+    .reasoning-detail,
     .tool-detail-body {
         padding: 0 9px 10px;
+    }
+
+    .reasoning-content {
+        max-height: 42vh;
+        font-size: 11px;
     }
 
     .tool-detail-section pre {
         max-height: 42vh;
         font-size: 9px;
+    }
+
+    .plan-header {
+        min-height: 57px;
+        gap: 8px;
+        padding: 9px 10px;
+    }
+
+    .plan-icon {
+        width: 29px;
+        height: 29px;
+    }
+
+    .plan-summary {
+        max-width: 56vw;
+    }
+
+    .plan-explanation {
+        margin-inline: 11px;
+    }
+
+    .plan-steps {
+        padding-inline: 7px;
+    }
+
+    .plan-step {
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 7px;
+        padding-inline: 6px;
+    }
+
+    .plan-step-state {
+        display: none;
     }
 
     .message-bubble {
