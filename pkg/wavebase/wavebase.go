@@ -35,7 +35,7 @@ const (
 	WaveDevViteVarName             = "WAVETERM_DEV_VITE"
 	WaveWshForceUpdateVarName      = "WAVETERM_WSHFORCEUPDATE"
 	WaveNoConfirmQuitVarName       = "WAVETERM_NOCONFIRMQUIT"
-	WshCodexWebCapability          = "wavecodex1"
+	WshCodexWebCapability          = "wavecodex2"
 
 	WaveJwtTokenVarName  = "WAVETERM_JWT"
 	WaveSwapTokenVarName = "WAVETERM_SWAPTOKEN"
