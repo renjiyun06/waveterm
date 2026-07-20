@@ -25,6 +25,11 @@ const (
 	ConfigKey_FileWorkspaceWidth             = "fileworkspace:width"
 	ConfigKey_FileWorkspaceHeight            = "fileworkspace:height"
 
+	ConfigKey_WebRemoteClear                 = "webremote:*"
+	ConfigKey_WebRemoteEnabled               = "webremote:enabled"
+	ConfigKey_WebRemoteListen                = "webremote:listen"
+	ConfigKey_WebRemoteToken                 = "webremote:token"
+
 	ConfigKey_FeatureWaveAppBuilder          = "feature:waveappbuilder"
 
 	ConfigKey_AiClear                        = "ai:*"

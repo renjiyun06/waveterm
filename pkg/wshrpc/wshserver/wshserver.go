@@ -28,6 +28,7 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/blockcontroller"
 	"github.com/wavetermdev/waveterm/pkg/blocklogger"
 	"github.com/wavetermdev/waveterm/pkg/buildercontroller"
+	"github.com/wavetermdev/waveterm/pkg/codexremote"
 	"github.com/wavetermdev/waveterm/pkg/filebackup"
 	"github.com/wavetermdev/waveterm/pkg/filestore"
 	"github.com/wavetermdev/waveterm/pkg/genconn"
@@ -113,6 +114,27 @@ func (ws *WshServer) StreamTestCommand(ctx context.Context) chan wshrpc.RespOrEr
 	return rtn
 }
 
+func (ws *WshServer) CodexSessionRegisterCommand(ctx context.Context, data wshrpc.CodexSessionRegisterData) error {
+	block, err := wstore.DBMustGet[*waveobj.Block](ctx, data.BlockId)
+	if err != nil {
+		return fmt.Errorf("loading Codex terminal block: %w", err)
+	}
+	data.BlockName = codexBlockNameFromMeta(block.Meta)
+	return codexremote.DefaultRegistry().Register(data)
+}
+
+func (ws *WshServer) CodexSessionEventCommand(ctx context.Context, data wshrpc.CodexSessionEventData) error {
+	return codexremote.DefaultRegistry().ApplyEvent(data)
+}
+
+func (ws *WshServer) CodexSessionPollCommand(ctx context.Context, data wshrpc.CodexSessionPollData) (wshrpc.CodexSessionAction, error) {
+	return codexremote.DefaultRegistry().Poll(ctx, data)
+}
+
+func (ws *WshServer) CodexSessionUnregisterCommand(ctx context.Context, data wshrpc.CodexSessionUnregisterData) error {
+	return codexremote.DefaultRegistry().Unregister(data)
+}
+
 func MakePlotData(ctx context.Context, blockId string) error {
 	block, err := wstore.DBMustGet[*waveobj.Block](ctx, blockId)
 	if err != nil {
@@ -183,7 +205,47 @@ func (ws *WshServer) SetMetaCommand(ctx context.Context, data wshrpc.CommandSetM
 		return fmt.Errorf("error updating object meta: %w", err)
 	}
 	wcore.SendWaveObjUpdate(oref)
+	updateCodexBlockName(ctx, oref, data.Meta)
 	return nil
+}
+
+func updateCodexBlockName(ctx context.Context, oref waveobj.ORef, changedMeta waveobj.MetaMapType) {
+	if oref.OType != waveobj.OType_Block {
+		return
+	}
+	titleChanged := false
+	for _, key := range []string{
+		waveobj.MetaKey_FrameText,
+		waveobj.MetaKey_FrameTitle,
+		waveobj.MetaKey_DisplayName,
+		waveobj.MetaKey_FrameClear,
+	} {
+		if _, ok := changedMeta[key]; ok {
+			titleChanged = true
+			break
+		}
+	}
+	if !titleChanged {
+		return
+	}
+	block, err := wstore.DBMustGet[*waveobj.Block](ctx, oref.OID)
+	if err != nil {
+		return
+	}
+	codexremote.DefaultRegistry().UpdateBlockName(oref.OID, codexBlockNameFromMeta(block.Meta))
+}
+
+func codexBlockNameFromMeta(meta waveobj.MetaMapType) string {
+	for _, key := range []string{
+		waveobj.MetaKey_FrameText,
+		waveobj.MetaKey_FrameTitle,
+		waveobj.MetaKey_DisplayName,
+	} {
+		if value := strings.TrimSpace(meta.GetString(key, "")); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (ws *WshServer) GetRTInfoCommand(ctx context.Context, data wshrpc.CommandGetRTInfoData) (*waveobj.ObjRTInfo, error) {
@@ -691,7 +753,11 @@ func (ws *WshServer) ConnUpdateWshCommand(ctx context.Context, remoteInfo wshrpc
 	}
 
 	log.Printf("checking wsh version for connection %s (current: %s)", connName, remoteInfo.ClientVersion)
-	upToDate, _, _, err := conncontroller.IsWshVersionUpToDate(ctx, remoteInfo.ClientVersion)
+	version := strings.TrimSpace(remoteInfo.ClientVersion)
+	if !strings.HasPrefix(version, "wsh ") {
+		version = "wsh v" + strings.TrimPrefix(version, "v")
+	}
+	upToDate, _, _, err := conncontroller.IsWshVersionUpToDate(ctx, version)
 	if err != nil {
 		return false, fmt.Errorf("unable to compare wsh version: %w", err)
 	}

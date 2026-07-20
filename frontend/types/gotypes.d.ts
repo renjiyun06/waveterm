@@ -226,6 +226,46 @@ declare global {
         newactivetabid?: string;
     };
 
+    // wshrpc.CodexSessionAction
+    type CodexSessionAction = {
+        actionid?: string;
+        kind?: string;
+        threadid?: string;
+        turnid?: string;
+        text?: string;
+    };
+
+    // wshrpc.CodexSessionEventData
+    type CodexSessionEventData = {
+        bridgeid: string;
+        blockid: string;
+        kind: string;
+        data?: string;
+    };
+
+    // wshrpc.CodexSessionPollData
+    type CodexSessionPollData = {
+        bridgeid: string;
+        blockid: string;
+    };
+
+    // wshrpc.CodexSessionRegisterData
+    type CodexSessionRegisterData = {
+        bridgeid: string;
+        blockid: string;
+        tabid?: string;
+        workspaceid?: string;
+        connection?: string;
+        blockname?: string;
+        cwd?: string;
+    };
+
+    // wshrpc.CodexSessionUnregisterData
+    type CodexSessionUnregisterData = {
+        bridgeid: string;
+        blockid: string;
+    };
+
     // wshrpc.CommandAuthenticateJobManagerData
     type CommandAuthenticateJobManagerData = {
         jobid: string;
@@ -1458,6 +1498,10 @@ declare global {
         "fileworkspace:opacity"?: number;
         "fileworkspace:width"?: number;
         "fileworkspace:height"?: number;
+        "webremote:*"?: boolean;
+        "webremote:enabled"?: boolean;
+        "webremote:listen"?: string;
+        "webremote:token"?: string;
         "feature:waveappbuilder"?: boolean;
         "ai:*"?: boolean;
         "ai:preset"?: string;

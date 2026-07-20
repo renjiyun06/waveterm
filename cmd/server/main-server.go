@@ -5,9 +5,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"runtime"
 	"sync"
@@ -38,6 +40,7 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wconfig"
 	"github.com/wavetermdev/waveterm/pkg/wcore"
 	"github.com/wavetermdev/waveterm/pkg/web"
+	"github.com/wavetermdev/waveterm/pkg/webremote"
 	"github.com/wavetermdev/waveterm/pkg/wps"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
@@ -65,7 +68,10 @@ const BackupCleanupInterval = 4 * time.Hour
 const InitialDiagnosticWait = 5 * time.Minute
 const DiagnosticTick = 10 * time.Minute
 
-var shutdownOnce sync.Once
+var (
+	shutdownOnce     sync.Once
+	webRemoteManager *webremote.Manager
+)
 
 func init() {
 	envFilePath := os.Getenv("WAVETERM_ENVFILE")
@@ -85,6 +91,9 @@ func doShutdown(reason string) {
 		sendTelemetryWrapper()
 		// TODO deal with flush in progress
 		clearTempFiles()
+		if webRemoteManager != nil {
+			_ = webRemoteManager.Close()
+		}
 		filestore.WFS.FlushCache(ctx)
 		watcher := wconfig.GetWatcher()
 		if watcher != nil {
@@ -116,6 +125,24 @@ func startConfigWatcher() {
 	if watcher != nil {
 		watcher.Start()
 	}
+}
+
+func setupCodexWebServer() error {
+	manager, err := webremote.NewManager(filepath.Join(wavebase.GetWaveAppPath(), "webremote"))
+	if err != nil {
+		return err
+	}
+	webRemoteManager = manager
+	watcher := wconfig.GetWatcher()
+	if watcher == nil {
+		return errors.New("configuration watcher unavailable")
+	}
+	watcher.RegisterUpdateHandler(func(config wconfig.FullConfigType) {
+		if err := manager.ApplySettings(config.Settings); err != nil {
+			log.Printf("[error] applying Codex Web settings: %v", err)
+		}
+	})
+	return manager.ApplySettings(watcher.GetFullConfig().Settings)
 }
 
 func telemetryLoop() {
@@ -575,6 +602,9 @@ func main() {
 	blocklogger.InitBlockLogger()
 	jobcontroller.InitJobController()
 	blockcontroller.InitBlockController()
+	if err := setupCodexWebServer(); err != nil {
+		log.Printf("[error] setting up Codex Web server: %v", err)
+	}
 	err = wcore.InitBadgeStore()
 	if err != nil {
 		log.Printf("error initializing badge store: %v\n", err)

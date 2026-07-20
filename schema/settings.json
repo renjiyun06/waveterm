@@ -65,6 +65,18 @@
         "fileworkspace:height": {
           "type": "number"
         },
+        "webremote:*": {
+          "type": "boolean"
+        },
+        "webremote:enabled": {
+          "type": "boolean"
+        },
+        "webremote:listen": {
+          "type": "string"
+        },
+        "webremote:token": {
+          "type": "string"
+        },
         "feature:waveappbuilder": {
           "type": "boolean"
         },

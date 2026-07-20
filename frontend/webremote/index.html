@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#0c1017" />
+    <meta name="color-scheme" content="dark" />
+    <title>Wave Codex</title>
+    <script type="module" src="/main.ts"></script>
+  </head>
+  <body>
+    <div id="app-shell" class="app-shell" hidden>
+      <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+      <aside id="sidebar" class="sidebar" aria-label="Codex 会话列表">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">W</div>
+          <div class="brand-copy">
+            <div class="brand-title">Wave Codex</div>
+            <div class="brand-subtitle">桌面与 Web 共用同一会话</div>
+          </div>
+          <button id="sidebar-close" class="icon-button mobile-only" type="button" aria-label="关闭会话列表">×</button>
+        </div>
+
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="session-search" type="search" placeholder="搜索会话或目录" autocomplete="off" />
+        </label>
+
+        <div id="session-list" class="session-list" aria-live="polite"></div>
+
+        <div class="sidebar-footer">
+          <span id="session-count" class="session-count">0 个会话</span>
+          <button id="logout" class="text-button" type="button">退出登录</button>
+        </div>
+      </aside>
+
+      <main class="chat-workspace">
+        <header class="topbar">
+          <button id="sidebar-open" class="icon-button mobile-only" type="button" aria-label="打开会话列表">☰</button>
+          <div class="conversation-heading">
+            <div id="conversation-title" class="conversation-title">等待 Codex 会话</div>
+            <div id="conversation-meta" class="conversation-meta">请先在 Wave 终端中运行 codex</div>
+          </div>
+          <div id="connection-state" class="connection-state" data-state="connecting">
+            <span class="state-dot"></span>
+            <span id="connection-label">连接中</span>
+          </div>
+        </header>
+
+        <section id="chat-scroll" class="chat-scroll" aria-live="polite">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-mark" aria-hidden="true">›_</div>
+            <h1>从终端继续你的 Codex 对话</h1>
+            <p>
+              在任意 Wave 终端运行 <code>codex</code>、<code>codex resume</code> 或
+              <code>codex fork</code>，对应会话会自动出现在这里。
+            </p>
+          </div>
+          <div id="message-list" class="message-list" hidden></div>
+        </section>
+
+        <footer id="composer-area" class="composer-area">
+          <div id="session-error" class="session-error" hidden></div>
+          <form id="composer" class="composer">
+            <textarea
+              id="message-input"
+              rows="1"
+              maxlength="65536"
+              placeholder="选择一个 Codex 会话后即可发送消息"
+              enterkeyhint="send"
+              autocomplete="off"
+              disabled
+            ></textarea>
+            <div class="composer-actions">
+              <button id="interrupt" class="interrupt-button" type="button" hidden>停止</button>
+              <button id="send-message" class="send-button" type="submit" disabled aria-label="发送消息">↑</button>
+            </div>
+          </form>
+          <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+        </footer>
+      </main>
+    </div>
+
+    <div id="login-screen" class="login-screen">
+      <form id="login-form" class="login-card">
+        <div class="login-mark">W</div>
+        <h1>连接到 Wave Codex</h1>
+        <p>输入 Wave 设置中的 Web 访问令牌。</p>
+        <label>
+          <span>访问令牌</span>
+          <input
+            id="access-token"
+            name="token"
+            type="password"
+            minlength="16"
+            required
+            autocomplete="current-password"
+            placeholder="至少 16 个字符"
+          />
+        </label>
+        <div id="login-error" class="login-error" aria-live="polite"></div>
+        <button id="login-submit" class="primary-button" type="submit">登录</button>
+      </form>
+    </div>
+  </body>
+</html>

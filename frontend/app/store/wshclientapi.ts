@@ -102,6 +102,30 @@ export class RpcApiType {
         return client.wshRpcCall("checkgoversion", null, opts);
     }
 
+    // command "codexsessionevent" [call]
+    CodexSessionEventCommand(client: WshClient, data: CodexSessionEventData, opts?: RpcOpts): Promise<void> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "codexsessionevent", data, opts);
+        return client.wshRpcCall("codexsessionevent", data, opts);
+    }
+
+    // command "codexsessionpoll" [call]
+    CodexSessionPollCommand(client: WshClient, data: CodexSessionPollData, opts?: RpcOpts): Promise<CodexSessionAction> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "codexsessionpoll", data, opts);
+        return client.wshRpcCall("codexsessionpoll", data, opts);
+    }
+
+    // command "codexsessionregister" [call]
+    CodexSessionRegisterCommand(client: WshClient, data: CodexSessionRegisterData, opts?: RpcOpts): Promise<void> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "codexsessionregister", data, opts);
+        return client.wshRpcCall("codexsessionregister", data, opts);
+    }
+
+    // command "codexsessionunregister" [call]
+    CodexSessionUnregisterCommand(client: WshClient, data: CodexSessionUnregisterData, opts?: RpcOpts): Promise<void> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "codexsessionunregister", data, opts);
+        return client.wshRpcCall("codexsessionunregister", data, opts);
+    }
+
     // command "connconnect" [call]
     ConnConnectCommand(client: WshClient, data: ConnRequest, opts?: RpcOpts): Promise<void> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "connconnect", data, opts);

@@ -490,5 +490,6 @@ func makeSwapToken(ctx context.Context, logCtx context.Context, blockId string, 
 		token.Env[k] = v
 	}
 	token.ScriptText = getCustomInitScript(logCtx, blockMeta, remoteName, shellType)
+	token.ScriptText += getCodexRemoteWrapperScript(shellType)
 	return token
 }

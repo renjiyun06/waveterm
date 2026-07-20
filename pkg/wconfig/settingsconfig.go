@@ -76,6 +76,11 @@ type SettingsType struct {
 	FileWorkspaceWidth   *float64 `json:"fileworkspace:width,omitempty"`
 	FileWorkspaceHeight  *float64 `json:"fileworkspace:height,omitempty"`
 
+	WebRemoteClear   bool   `json:"webremote:*,omitempty"`
+	WebRemoteEnabled bool   `json:"webremote:enabled,omitempty"`
+	WebRemoteListen  string `json:"webremote:listen,omitempty"`
+	WebRemoteToken   string `json:"webremote:token,omitempty"`
+
 	FeatureWaveAppBuilder bool `json:"feature:waveappbuilder,omitempty"`
 
 	AiClear         bool    `json:"ai:*,omitempty"`

@@ -402,7 +402,7 @@ func GetInfo() wshrpc.RemoteInfo {
 	return wshrpc.RemoteInfo{
 		ClientArch:    runtime.GOARCH,
 		ClientOs:      runtime.GOOS,
-		ClientVersion: wavebase.WaveVersion,
+		ClientVersion: wavebase.GetWshVersion(),
 		Shell:         getShell(),
 		HomeDir:       wavebase.GetHomeDir(),
 	}

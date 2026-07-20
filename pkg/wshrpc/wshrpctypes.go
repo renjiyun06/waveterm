@@ -176,6 +176,12 @@ type WshRpcInterface interface {
 	// terminal
 	TermGetScrollbackLinesCommand(ctx context.Context, data CommandTermGetScrollbackLinesData) (*CommandTermGetScrollbackLinesRtnData, error)
 
+	// codex remote chat
+	CodexSessionRegisterCommand(ctx context.Context, data CodexSessionRegisterData) error
+	CodexSessionEventCommand(ctx context.Context, data CodexSessionEventData) error
+	CodexSessionPollCommand(ctx context.Context, data CodexSessionPollData) (CodexSessionAction, error)
+	CodexSessionUnregisterCommand(ctx context.Context, data CodexSessionUnregisterData) error
+
 	// file
 	WshRpcFileInterface
 	WaveFileReadStreamCommand(ctx context.Context, data CommandWaveFileReadStreamData) (*WaveFileInfo, error)
@@ -316,6 +322,41 @@ type CommandBlockInputData struct {
 	InputData64 string            `json:"inputdata64,omitempty"`
 	SigName     string            `json:"signame,omitempty"`
 	TermSize    *waveobj.TermSize `json:"termsize,omitempty"`
+}
+
+type CodexSessionRegisterData struct {
+	BridgeId    string `json:"bridgeid"`
+	BlockId     string `json:"blockid"`
+	TabId       string `json:"tabid,omitempty"`
+	WorkspaceId string `json:"workspaceid,omitempty"`
+	Connection  string `json:"connection,omitempty"`
+	BlockName   string `json:"blockname,omitempty"`
+	Cwd         string `json:"cwd,omitempty"`
+}
+
+type CodexSessionEventData struct {
+	BridgeId string `json:"bridgeid"`
+	BlockId  string `json:"blockid"`
+	Kind     string `json:"kind"`
+	Data     string `json:"data,omitempty"`
+}
+
+type CodexSessionPollData struct {
+	BridgeId string `json:"bridgeid"`
+	BlockId  string `json:"blockid"`
+}
+
+type CodexSessionUnregisterData struct {
+	BridgeId string `json:"bridgeid"`
+	BlockId  string `json:"blockid"`
+}
+
+type CodexSessionAction struct {
+	ActionId string `json:"actionid,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	ThreadId string `json:"threadid,omitempty"`
+	TurnId   string `json:"turnid,omitempty"`
+	Text     string `json:"text,omitempty"`
 }
 
 type CommandJobInputData struct {

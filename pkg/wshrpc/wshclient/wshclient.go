@@ -101,6 +101,30 @@ func CheckGoVersionCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (*wshrpc.Com
 	return resp, err
 }
 
+// command "codexsessionevent", wshserver.CodexSessionEventCommand
+func CodexSessionEventCommand(w *wshutil.WshRpc, data wshrpc.CodexSessionEventData, opts *wshrpc.RpcOpts) error {
+	_, err := sendRpcRequestCallHelper[any](w, "codexsessionevent", data, opts)
+	return err
+}
+
+// command "codexsessionpoll", wshserver.CodexSessionPollCommand
+func CodexSessionPollCommand(w *wshutil.WshRpc, data wshrpc.CodexSessionPollData, opts *wshrpc.RpcOpts) (wshrpc.CodexSessionAction, error) {
+	resp, err := sendRpcRequestCallHelper[wshrpc.CodexSessionAction](w, "codexsessionpoll", data, opts)
+	return resp, err
+}
+
+// command "codexsessionregister", wshserver.CodexSessionRegisterCommand
+func CodexSessionRegisterCommand(w *wshutil.WshRpc, data wshrpc.CodexSessionRegisterData, opts *wshrpc.RpcOpts) error {
+	_, err := sendRpcRequestCallHelper[any](w, "codexsessionregister", data, opts)
+	return err
+}
+
+// command "codexsessionunregister", wshserver.CodexSessionUnregisterCommand
+func CodexSessionUnregisterCommand(w *wshutil.WshRpc, data wshrpc.CodexSessionUnregisterData, opts *wshrpc.RpcOpts) error {
+	_, err := sendRpcRequestCallHelper[any](w, "codexsessionunregister", data, opts)
+	return err
+}
+
 // command "connconnect", wshserver.ConnConnectCommand
 func ConnConnectCommand(w *wshutil.WshRpc, data wshrpc.ConnRequest, opts *wshrpc.RpcOpts) error {
 	_, err := sendRpcRequestCallHelper[any](w, "connconnect", data, opts)

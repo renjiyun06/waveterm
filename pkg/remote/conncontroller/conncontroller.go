@@ -326,6 +326,9 @@ func IsWshVersionUpToDate(logCtx context.Context, wshVersionLine string) (bool, 
 	if semver.Compare(clientVersion, expectedVersion) < 0 {
 		return false, clientVersion, "", nil
 	}
+	if !wavebase.WshVersionHasCodexWeb(clientVersion) {
+		return false, clientVersion, "", nil
+	}
 	return true, clientVersion, "", nil
 }
 

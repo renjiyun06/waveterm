@@ -846,6 +846,43 @@ func getCustomInitScript(logCtx context.Context, meta waveobj.MetaMapType, connN
 	return string(fileData)
 }
 
+func getCodexRemoteWrapperScript(shellType string) string {
+	switch shellType {
+	case "bash", "zsh":
+		return `
+codex() {
+    if [ -n "${WAVETERM_CODEX_WEB_DISABLE:-}" ]; then
+        command codex "$@"
+    else
+        command wsh codex "$@"
+    fi
+}
+`
+	case "fish":
+		return `
+function codex
+    if test -n "$WAVETERM_CODEX_WEB_DISABLE"
+        command codex $argv
+    else
+        command wsh codex $argv
+    end
+end
+`
+	case "pwsh":
+		return `
+function global:codex {
+    if ($env:WAVETERM_CODEX_WEB_DISABLE) {
+        & (Get-Command codex -CommandType Application).Source @args
+    } else {
+        & wsh codex @args
+    }
+}
+`
+	default:
+		return ""
+	}
+}
+
 // returns (value, metakey)
 func getCustomInitScriptValue(meta waveobj.MetaMapType, connName string, shellType string) (string, string) {
 	keys := getCustomInitScriptKeyCascade(shellType)

@@ -49,6 +49,9 @@ wsh editconfig
 | fileworkspace:opacity                                        | float64  | Opacity of the transient workbench, from `0.2` to `1` (defaults to `0.9`). This does not affect magnified blocks.                                                                                                                                             |
 | fileworkspace:width                                          | float64  | Width of the transient workbench as a fraction of the terminal layout, from `0.4` to `1` (defaults to `1`).                                                                                                                                                   |
 | fileworkspace:height                                         | float64  | Height of the transient workbench as a fraction of the terminal layout, from `0.3` to `1` (defaults to `0.78`).                                                                                                                                               |
+| webremote:enabled                                            | bool     | Enables the authenticated Codex Web chat service (defaults to `false`). See [Codex Web Chat](#codex-web-chat).                                                                                                                                                |
+| webremote:listen                                             | string   | TCP address for Codex Web chat (defaults to `127.0.0.1:16110`). Use `0.0.0.0:16110` only when access from a trusted LAN or a protected reverse proxy is required.                                                                                             |
+| webremote:token                                              | string   | Access token for Codex Web chat. Enabling the service requires at least 16 bytes.                                                                                                                                                                             |
 | ai:preset                                                    | string   | the default AI preset to use                                                                                                                                                                                                                                  |
 | ai:baseurl                                                   | string   | Set the AI Base Url (must be OpenAI compatible)                                                                                                                                                                                                               |
 | ai:apitoken                                                  | string   | your AI api token                                                                                                                                                                                                                                             |
@@ -139,6 +142,8 @@ For reference, this is the current default configuration (v0.14.0):
   "fileworkspace:opacity": 0.9,
   "fileworkspace:width": 1,
   "fileworkspace:height": 0.78,
+  "webremote:enabled": false,
+  "webremote:listen": "127.0.0.1:16110",
   "autoupdate:enabled": true,
   "autoupdate:installonquit": true,
   "autoupdate:intervalms": 3600000,
@@ -189,6 +194,34 @@ To avoid putting secrets directly in config files, Wave supports environment var
   "ai:baseurl": "$ENV:AI_BASEURL:https://api.openai.com/v1"
 }
 ```
+
+## Codex Web Chat
+
+Codex Web Chat exposes conversations from Codex TUI processes currently running in Wave terminals. It does not mirror terminal cells. Wave launches the same Codex command through a local app-server bridge, so a submitted Web message is added to the same Codex thread and appears in the desktop TUI.
+
+The wrapper preserves the original argument array. Interactive `codex`, `codex resume`, and `codex fork` invocations are managed, including the normal resume picker, thread IDs, `--last`, profiles, models, and prompts. Non-interactive commands such as `codex exec`, login, and MCP management pass through normally. An explicit Codex `--remote` value is never replaced.
+
+Enable access in `settings.json`:
+
+```json
+{
+  "webremote:enabled": true,
+  "webremote:listen": "0.0.0.0:16110",
+  "webremote:token": "replace-with-a-long-random-token"
+}
+```
+
+Then open `http://<wave-host>:16110` from the phone and enter the configured token. Start a new Wave terminal before launching Codex so the shell receives the managed wrapper. After a `codex resume` picker is completed, the chosen conversation and its persisted history appear automatically. Stale `wsh` helpers on SSH and WSL connections are refreshed automatically the next time those connections start.
+
+The Web session list uses the terminal's **Rename Block** title when one is set; otherwise it falls back to the Codex thread name and working directory.
+
+:::warning
+
+The service is disabled and loopback-only by default. Plain HTTP does not protect the token from an untrusted network. Restrict the port to a trusted LAN, VPN, or a TLS-enabled reverse proxy; do not expose it directly to the public internet.
+
+Approvals and structured user-input requests still require the desktop Codex TUI. Web drafts remain local to the browser until submitted. Set `WAVETERM_CODEX_WEB_DISABLE=1` in a terminal to bypass the Wave bridge for that invocation.
+
+:::
 
 ## WebBookmarks Configuration
 

@@ -11,6 +11,8 @@
     "fileworkspace:opacity": 0.9,
     "fileworkspace:width": 1,
     "fileworkspace:height": 0.78,
+    "webremote:enabled": false,
+    "webremote:listen": "127.0.0.1:16110",
     "term:showsplitbuttons": false,
     "app:disablectrlshiftarrows": false,
     "app:disablectrlshiftdisplay": false,

@@ -35,10 +35,35 @@ const (
 	WaveDevViteVarName             = "WAVETERM_DEV_VITE"
 	WaveWshForceUpdateVarName      = "WAVETERM_WSHFORCEUPDATE"
 	WaveNoConfirmQuitVarName       = "WAVETERM_NOCONFIRMQUIT"
+	WshCodexWebCapability          = "wavecodex1"
 
 	WaveJwtTokenVarName  = "WAVETERM_JWT"
 	WaveSwapTokenVarName = "WAVETERM_SWAPTOKEN"
 )
+
+func GetWshVersion() string {
+	if WshVersionHasCodexWeb(WaveVersion) {
+		return WaveVersion
+	}
+	if strings.Contains(WaveVersion, "+") {
+		return WaveVersion + "." + WshCodexWebCapability
+	}
+	return WaveVersion + "+" + WshCodexWebCapability
+}
+
+func WshVersionHasCodexWeb(version string) bool {
+	version = strings.TrimPrefix(version, "v")
+	buildIndex := strings.IndexByte(version, '+')
+	if buildIndex < 0 || buildIndex == len(version)-1 {
+		return false
+	}
+	for _, capability := range strings.Split(version[buildIndex+1:], ".") {
+		if capability == WshCodexWebCapability {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	BlockFile_Term  = "term"            // used for main pty output
