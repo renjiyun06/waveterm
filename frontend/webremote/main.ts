@@ -6,8 +6,14 @@ import "./style.css";
 type ChatMessage = {
     id: string;
     role: "user" | "assistant";
+    kind?: "message" | "reasoning" | "plan" | "tool";
+    toolType?: string;
+    title?: string;
     text: string;
+    input?: string;
+    output?: string;
     status?: string;
+    truncated?: boolean;
     createdAt: number;
 };
 
@@ -25,6 +31,10 @@ type CodexSession = {
     updatedAt: number;
     revision: number;
     messages: ChatMessage[];
+};
+
+type RawCodexSession = Omit<CodexSession, "messages"> & {
+    messages?: ChatMessage[] | null;
 };
 
 const getElement = <T extends HTMLElement>(id: string): T => {
@@ -179,6 +189,165 @@ const renderSessionList = () => {
     sessionCount.textContent = `${sessions.length} 个会话`;
 };
 
+const activityStatusLabel = (status?: string): string => {
+    switch (status) {
+        case "inProgress":
+        case "streaming":
+            return "进行中";
+        case "failed":
+            return "失败";
+        case "declined":
+            return "已拒绝";
+        default:
+            return "已完成";
+    }
+};
+
+const activityStatusClass = (status?: string): string => {
+    if (status === "inProgress" || status === "streaming") return "running";
+    if (status === "failed") return "failed";
+    if (status === "declined") return "declined";
+    return "completed";
+};
+
+const toolIcon = (toolType?: string): string => {
+    switch (toolType) {
+        case "command":
+            return ">_";
+        case "file":
+            return "Δ";
+        case "mcp":
+            return "M";
+        case "dynamic":
+            return "◆";
+        case "collab":
+            return "◎";
+        case "web":
+            return "⌕";
+        case "image":
+            return "▧";
+        case "wait":
+            return "◷";
+        case "context":
+            return "≋";
+        default:
+            return "•";
+    }
+};
+
+const renderConversationMessage = (article: HTMLElement, message: ChatMessage) => {
+    if (article.dataset.layout !== "message") {
+        article.replaceChildren();
+        const label = document.createElement("div");
+        label.className = "message-label";
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble";
+        article.append(label, bubble);
+        article.dataset.layout = "message";
+    }
+    article.className = `message ${message.role}`;
+    const label = article.querySelector<HTMLElement>(".message-label")!;
+    label.textContent = message.role === "user" ? "你" : "Codex";
+    const bubble = article.querySelector<HTMLElement>(".message-bubble")!;
+    const text = message.text || (message.status === "streaming" ? "…" : "");
+    if (bubble.textContent !== text) bubble.textContent = text;
+};
+
+const renderNarrativeItem = (article: HTMLElement, message: ChatMessage, kind: "reasoning" | "plan") => {
+    if (article.dataset.layout !== kind) {
+        article.replaceChildren();
+        const heading = document.createElement("div");
+        heading.className = "timeline-label";
+        const dot = document.createElement("span");
+        dot.className = "timeline-label-dot";
+        const label = document.createElement("span");
+        label.className = "timeline-label-text";
+        heading.append(dot, label);
+        const content = document.createElement("div");
+        content.className = "timeline-copy";
+        article.append(heading, content);
+        article.dataset.layout = kind;
+    }
+    article.className = `timeline-item ${kind} ${activityStatusClass(message.status)}`;
+    article.querySelector<HTMLElement>(".timeline-label-text")!.textContent =
+        message.title || (kind === "reasoning" ? "思考" : "计划");
+    const fallback = kind === "reasoning" ? "正在思考…" : "正在整理计划…";
+    const content = article.querySelector<HTMLElement>(".timeline-copy")!;
+    const text = message.text || fallback;
+    if (content.textContent !== text) content.textContent = text;
+};
+
+const createToolSection = (name: string, label: string): HTMLElement => {
+    const section = document.createElement("section");
+    section.className = "tool-detail-section";
+    section.dataset.toolSection = name;
+    const heading = document.createElement("div");
+    heading.className = "tool-detail-label";
+    heading.textContent = label;
+    const content = document.createElement("pre");
+    section.append(heading, content);
+    return section;
+};
+
+const renderToolItem = (article: HTMLElement, message: ChatMessage) => {
+    if (article.dataset.layout !== "tool") {
+        article.replaceChildren();
+        const details = document.createElement("details");
+        details.className = "tool-card";
+        const summary = document.createElement("summary");
+        const icon = document.createElement("span");
+        icon.className = "tool-icon";
+        const copy = document.createElement("span");
+        copy.className = "tool-summary-copy";
+        const title = document.createElement("span");
+        title.className = "tool-title";
+        const preview = document.createElement("span");
+        preview.className = "tool-preview";
+        copy.append(title, preview);
+        const state = document.createElement("span");
+        state.className = "tool-state";
+        const chevron = document.createElement("span");
+        chevron.className = "tool-chevron";
+        chevron.textContent = "⌄";
+        summary.append(icon, copy, state, chevron);
+        const body = document.createElement("div");
+        body.className = "tool-detail-body";
+        body.append(createToolSection("input", "调用信息"), createToolSection("output", "结果与输出"));
+        const truncated = document.createElement("div");
+        truncated.className = "tool-truncated";
+        truncated.textContent = "内容过长，已保留开头和末尾。";
+        body.append(truncated);
+        details.append(summary, body);
+        summary.addEventListener("click", (event) => {
+            if (details.classList.contains("no-details")) event.preventDefault();
+        });
+        article.append(details);
+        article.dataset.layout = "tool";
+    }
+    article.className = "timeline-item tool";
+    const details = article.querySelector<HTMLDetailsElement>(".tool-card")!;
+    details.className = `tool-card ${message.toolType ?? "generic"} ${activityStatusClass(message.status)}`;
+    details.querySelector<HTMLElement>(".tool-icon")!.textContent = toolIcon(message.toolType);
+    details.querySelector<HTMLElement>(".tool-title")!.textContent = message.title || "工具调用";
+    details.querySelector<HTMLElement>(".tool-preview")!.textContent =
+        message.text || (message.status === "inProgress" ? "等待结果…" : "查看详情");
+    const state = details.querySelector<HTMLElement>(".tool-state")!;
+    state.className = `tool-state ${activityStatusClass(message.status)}`;
+    state.textContent = activityStatusLabel(message.status);
+
+    const inputSection = details.querySelector<HTMLElement>('[data-tool-section="input"]')!;
+    const outputSection = details.querySelector<HTMLElement>('[data-tool-section="output"]')!;
+    inputSection.hidden = !message.input;
+    outputSection.hidden = !message.output;
+    inputSection.querySelector("pre")!.textContent = message.input ?? "";
+    outputSection.querySelector("pre")!.textContent = message.output ?? "";
+    const truncated = details.querySelector<HTMLElement>(".tool-truncated")!;
+    truncated.hidden = !message.truncated;
+    const hasDetails = Boolean(message.input || message.output || message.truncated);
+    details.classList.toggle("no-details", !hasDetails);
+    if (!hasDetails) details.open = false;
+};
+
 const renderMessages = (session?: CodexSession) => {
     const nextBlockId = session?.blockId ?? "";
     const sessionChanged = renderedBlockId !== nextBlockId;
@@ -187,7 +356,8 @@ const renderMessages = (session?: CodexSession) => {
         renderedBlockId = nextBlockId;
     }
     const wasNearBottom = chatScroll.scrollHeight - chatScroll.scrollTop - chatScroll.clientHeight < 100;
-    if (!session || session.messages.length === 0) {
+    const messages = session?.messages ?? [];
+    if (!session || messages.length === 0) {
         messageList.replaceChildren();
         messageList.hidden = true;
         emptyState.hidden = false;
@@ -215,24 +385,21 @@ const renderMessages = (session?: CodexSession) => {
         if (article.dataset.messageId) existing.set(article.dataset.messageId, article);
     }
     const retained = new Set<string>();
-    session.messages.forEach((message, index) => {
+    messages.forEach((message, index) => {
         let article = existing.get(message.id);
         if (!article) {
             article = document.createElement("article");
-            const label = document.createElement("div");
-            label.className = "message-label";
-            const bubble = document.createElement("div");
-            bubble.className = "message-bubble";
-            article.append(label, bubble);
         }
         retained.add(message.id);
-        article.className = `message ${message.role}`;
         article.dataset.messageId = message.id;
-        const label = article.querySelector<HTMLElement>(".message-label")!;
-        label.textContent = message.role === "user" ? "你" : "Codex";
-        const bubble = article.querySelector<HTMLElement>(".message-bubble")!;
-        const text = message.text || (message.status === "streaming" ? "…" : "");
-        if (bubble.textContent !== text) bubble.textContent = text;
+        const kind = message.kind ?? "message";
+        if (kind === "tool") {
+            renderToolItem(article, message);
+        } else if (kind === "reasoning" || kind === "plan") {
+            renderNarrativeItem(article, message, kind);
+        } else {
+            renderConversationMessage(article, message);
+        }
         const currentAtIndex = messageList.children.item(index);
         if (currentAtIndex !== article) messageList.insertBefore(article, currentAtIndex);
     });
@@ -275,8 +442,11 @@ const render = () => {
     updateComposer(selected);
 };
 
-const applySessions = (nextSessions: CodexSession[]) => {
-    sessions = nextSessions;
+const applySessions = (nextSessions?: RawCodexSession[] | null) => {
+    sessions = (Array.isArray(nextSessions) ? nextSessions : []).map((session) => ({
+        ...session,
+        messages: Array.isArray(session.messages) ? session.messages : [],
+    }));
     render();
 };
 
@@ -286,8 +456,8 @@ const connectEvents = () => {
     connectionLabel.textContent = "连接中";
     eventSource = new EventSource("/api/events");
     eventSource.addEventListener("sessions", (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as { sessions: CodexSession[] };
-        applySessions(payload.sessions ?? []);
+        const payload = JSON.parse((event as MessageEvent<string>).data) as { sessions?: RawCodexSession[] | null };
+        applySessions(payload.sessions);
         connectionState.dataset.state = "online";
         connectionLabel.textContent = "已同步";
     });

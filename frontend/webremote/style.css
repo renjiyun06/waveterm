@@ -373,6 +373,228 @@ textarea::placeholder {
     padding: 2px 3px;
 }
 
+.timeline-item {
+    margin: 0 0 18px;
+}
+
+.timeline-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 7px 2px;
+    color: #8390a4;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.timeline-label-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #7584a0;
+}
+
+.timeline-item.running .timeline-label-dot {
+    background: #91a9ff;
+    box-shadow: 0 0 9px rgba(139, 164, 255, 0.55);
+}
+
+.timeline-copy {
+    max-width: 760px;
+    padding: 10px 13px;
+    border-left: 2px solid rgba(132, 151, 196, 0.24);
+    color: #aeb8c8;
+    background: linear-gradient(90deg, rgba(106, 124, 168, 0.075), transparent 82%);
+    font-size: 12px;
+    line-height: 1.68;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.timeline-item.plan .timeline-copy {
+    border: 1px solid rgba(125, 150, 229, 0.14);
+    border-left: 2px solid rgba(139, 164, 255, 0.45);
+    border-radius: 8px;
+    color: #bec8dc;
+    background: rgba(82, 105, 178, 0.07);
+}
+
+.tool-card {
+    overflow: hidden;
+    border: 1px solid rgba(142, 156, 181, 0.14);
+    border-radius: 11px;
+    background: rgba(18, 25, 36, 0.72);
+}
+
+.tool-card > summary {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tool-card > summary::-webkit-details-marker {
+    display: none;
+}
+
+.tool-card > summary:hover {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.tool-card > summary:focus-visible {
+    outline: 2px solid rgba(139, 164, 255, 0.45);
+    outline-offset: -2px;
+}
+
+.tool-card.no-details > summary {
+    cursor: default;
+}
+
+.tool-icon {
+    width: 29px;
+    height: 29px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border: 1px solid rgba(139, 164, 255, 0.16);
+    border-radius: 8px;
+    color: #9baded;
+    background: rgba(94, 119, 205, 0.08);
+    font:
+        600 10px/1 ui-monospace,
+        SFMono-Regular,
+        Consolas,
+        monospace;
+}
+
+.tool-card.file .tool-icon {
+    color: #7fd2ae;
+    border-color: rgba(105, 201, 158, 0.17);
+    background: rgba(76, 167, 127, 0.08);
+}
+
+.tool-card.web .tool-icon {
+    color: #8ac4e8;
+    border-color: rgba(93, 177, 224, 0.17);
+    background: rgba(74, 143, 184, 0.08);
+}
+
+.tool-summary-copy {
+    min-width: 0;
+    display: grid;
+    flex: 1;
+    gap: 3px;
+}
+
+.tool-title {
+    overflow: hidden;
+    color: #c5cedd;
+    font-size: 11px;
+    font-weight: 640;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-preview {
+    display: -webkit-box;
+    overflow: hidden;
+    color: #7f8b9e;
+    font-size: 10px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.tool-card.command .tool-preview,
+.tool-card.file .tool-preview {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.tool-state {
+    flex: none;
+    padding: 3px 7px;
+    border-radius: 999px;
+    color: #8794a7;
+    background: rgba(134, 148, 170, 0.08);
+    font-size: 9px;
+}
+
+.tool-state.running {
+    color: #b6c5ff;
+    background: rgba(102, 131, 235, 0.14);
+}
+
+.tool-state.failed,
+.tool-state.declined {
+    color: #efa9a4;
+    background: rgba(211, 79, 72, 0.11);
+}
+
+.tool-chevron {
+    flex: none;
+    color: #68758a;
+    font-size: 12px;
+    transition: transform 140ms ease;
+}
+
+.tool-card[open] .tool-chevron {
+    transform: rotate(180deg);
+}
+
+.tool-card.no-details .tool-chevron {
+    visibility: hidden;
+}
+
+.tool-detail-body {
+    padding: 0 12px 12px 50px;
+    border-top: 1px solid rgba(142, 156, 181, 0.1);
+}
+
+.tool-detail-section {
+    padding-top: 11px;
+}
+
+.tool-detail-label {
+    margin-bottom: 6px;
+    color: #77849a;
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.tool-detail-section pre {
+    max-height: min(46vh, 460px);
+    margin: 0;
+    padding: 10px 11px;
+    overflow: auto;
+    border: 1px solid rgba(142, 156, 181, 0.1);
+    border-radius: 8px;
+    color: #b8c2d1;
+    background: rgba(4, 8, 14, 0.38);
+    font:
+        10px/1.58 ui-monospace,
+        SFMono-Regular,
+        Consolas,
+        monospace;
+    overflow-wrap: normal;
+    tab-size: 4;
+    white-space: pre;
+}
+
+.tool-truncated {
+    margin-top: 9px;
+    color: #a7906c;
+    font-size: 9px;
+}
+
 .empty-state {
     max-width: 560px;
     margin: min(15vh, 120px) auto 0;
@@ -667,6 +889,33 @@ textarea::placeholder {
 
     .message {
         margin-bottom: 21px;
+    }
+
+    .timeline-item {
+        margin-bottom: 15px;
+    }
+
+    .timeline-copy {
+        padding: 9px 11px;
+    }
+
+    .tool-card > summary {
+        min-height: 49px;
+        gap: 8px;
+        padding: 8px 9px;
+    }
+
+    .tool-state {
+        padding-inline: 6px;
+    }
+
+    .tool-detail-body {
+        padding: 0 9px 10px;
+    }
+
+    .tool-detail-section pre {
+        max-height: 42vh;
+        font-size: 9px;
     }
 
     .message-bubble {

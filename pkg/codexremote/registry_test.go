@@ -5,6 +5,8 @@ package codexremote
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/wavetermdev/waveterm/pkg/wshrpc"
@@ -167,5 +169,115 @@ func TestBlockRenameWinsOverCodexThreadName(t *testing.T) {
 	session, ok = registry.Get("block-12345678")
 	if !ok || session.Title != "New Codex title" {
 		t.Fatalf("clearing block rename did not restore the Codex title: %#v", session)
+	}
+}
+
+func TestEmptySessionMessagesEncodeAsArray(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	session, ok := registry.Get("block-12345678")
+	if !ok {
+		t.Fatal("session missing")
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal session: %v", err)
+	}
+	if !strings.Contains(string(data), `"messages":[]`) {
+		t.Fatalf("empty messages encoded as null: %s", data)
+	}
+}
+
+func TestSnapshotIncludesReasoningAndToolActivity(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	snapshot := `{
+		"thread": {
+			"id": "thread-activity",
+			"status": {"type": "idle"},
+			"turns": [{
+				"id": "turn-activity",
+				"status": "completed",
+				"startedAt": 1700000000,
+				"items": [
+					{"id":"reason-1","type":"reasoning","summary":["检查仓库","运行测试"],"content":["raw reasoning must not be exposed"]},
+					{"id":"command-1","type":"commandExecution","command":"go test ./...","cwd":"/work/project","status":"completed","aggregatedOutput":"ok","exitCode":0},
+					{"id":"mcp-1","type":"mcpToolCall","server":"github","tool":"get_issue","status":"completed","arguments":{"number":42},"result":{"content":[{"type":"text","text":"done"}]}},
+					{"id":"file-1","type":"fileChange","status":"completed","changes":[{"path":"main.go","kind":{"type":"update","move_path":null},"diff":"@@ changed"}]},
+					{"id":"web-1","type":"webSearch","query":"Codex app server","action":{"type":"search","query":"Codex app server","queries":null}},
+					{"id":"agent-1","type":"agentMessage","text":"完成"}
+				]
+			}]
+		}
+	}`
+	if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{
+		BridgeId: "bridge-1",
+		BlockId:  "block-12345678",
+		Kind:     "snapshot",
+		Data:     snapshot,
+	}); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	session, ok := registry.Get("block-12345678")
+	if !ok {
+		t.Fatal("session missing")
+	}
+	if len(session.Messages) != 6 {
+		t.Fatalf("timeline length = %d, want 6: %#v", len(session.Messages), session.Messages)
+	}
+	if session.Messages[0].Kind != "reasoning" ||
+		session.Messages[0].Text != "检查仓库\n\n运行测试" ||
+		strings.Contains(session.Messages[0].Text, "raw reasoning") {
+		t.Fatalf("unexpected reasoning item: %#v", session.Messages[0])
+	}
+	if session.Messages[1].ToolType != "command" ||
+		session.Messages[1].Output != "ok\n\n退出码: 0" {
+		t.Fatalf("unexpected command item: %#v", session.Messages[1])
+	}
+	if session.Messages[2].ToolType != "mcp" ||
+		!strings.Contains(session.Messages[2].Input, `"number": 42`) ||
+		!strings.Contains(session.Messages[2].Output, `"done"`) {
+		t.Fatalf("unexpected MCP item: %#v", session.Messages[2])
+	}
+	if session.Messages[3].ToolType != "file" ||
+		!strings.Contains(session.Messages[3].Output, "@@ changed") {
+		t.Fatalf("unexpected file item: %#v", session.Messages[3])
+	}
+	if session.Messages[4].ToolType != "web" || session.Messages[5].Kind != "message" {
+		t.Fatalf("unexpected final timeline items: %#v", session.Messages[4:])
+	}
+}
+
+func TestStreamingReasoningAndToolOutputUpdateTimeline(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	apply := func(notification string) {
+		t.Helper()
+		if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{
+			BridgeId: "bridge-1",
+			BlockId:  "block-12345678",
+			Kind:     "notification",
+			Data:     notification,
+		}); err != nil {
+			t.Fatalf("notification: %v", err)
+		}
+	}
+	apply(`{"method":"item/started","params":{"item":{"id":"reason-1","type":"reasoning","summary":[],"content":[]},"startedAtMs":1700000000000}}`)
+	apply(`{"method":"item/reasoning/summaryTextDelta","params":{"itemId":"reason-1","summaryIndex":0,"delta":"先检查"}}`)
+	apply(`{"method":"item/reasoning/summaryTextDelta","params":{"itemId":"reason-1","summaryIndex":1,"delta":"再修改"}}`)
+	apply(`{"method":"item/completed","params":{"item":{"id":"reason-1","type":"reasoning","summary":["先检查","再修改"],"content":[]},"completedAtMs":1700000001000}}`)
+	apply(`{"method":"item/started","params":{"item":{"id":"command-1","type":"commandExecution","command":"go test","cwd":"/work","status":"inProgress","aggregatedOutput":null},"startedAtMs":1700000002000}}`)
+	apply(`{"method":"item/commandExecution/outputDelta","params":{"itemId":"command-1","delta":"ok\n"}}`)
+	apply(`{"method":"item/completed","params":{"item":{"id":"command-1","type":"commandExecution","command":"go test","cwd":"/work","status":"completed","aggregatedOutput":"ok\n","exitCode":0},"completedAtMs":1700000003000}}`)
+
+	session, ok := registry.Get("block-12345678")
+	if !ok || len(session.Messages) != 2 {
+		t.Fatalf("unexpected timeline: %#v", session.Messages)
+	}
+	if session.Messages[0].Text != "先检查\n\n再修改" || session.Messages[0].Status != "completed" {
+		t.Fatalf("unexpected reasoning stream: %#v", session.Messages[0])
+	}
+	if session.Messages[1].Output != "ok\n\n退出码: 0" || session.Messages[1].Status != "completed" {
+		t.Fatalf("unexpected command stream: %#v", session.Messages[1])
 	}
 }

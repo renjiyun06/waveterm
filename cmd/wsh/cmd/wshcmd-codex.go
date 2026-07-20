@@ -62,11 +62,13 @@ type bridgeReport struct {
 	data string
 }
 
-type agentDeltaReport struct {
-	ThreadId string `json:"threadId"`
-	TurnId   string `json:"turnId"`
-	ItemId   string `json:"itemId"`
-	Delta    string `json:"delta"`
+type codexDeltaReport struct {
+	Method       string `json:"-"`
+	ThreadId     string `json:"threadId"`
+	TurnId       string `json:"turnId"`
+	ItemId       string `json:"itemId"`
+	Delta        string `json:"delta"`
+	SummaryIndex *int   `json:"summaryIndex,omitempty"`
 }
 
 type boundedLogBuffer struct {
@@ -77,13 +79,24 @@ type boundedLogBuffer struct {
 
 type codexProxy struct {
 	bridge        *codexBridge
-	upstreamURL   string
 	upstream      *websocket.Conn
 	upstreamLock  sync.Mutex
 	requestLock   sync.Mutex
 	tuiRequests   map[string]string
 	webRequestIds map[string]struct{}
+	pollOnce      sync.Once
+	pollFn        func()
 	closed        atomic.Bool
+}
+
+type codexProxyHost struct {
+	bridge         *codexBridge
+	upstreamURL    string
+	upgrader       websocket.Upgrader
+	connectionLock sync.Mutex
+	activeLock     sync.Mutex
+	active         *codexProxy
+	closed         atomic.Bool
 }
 
 type rpcEnvelope struct {
@@ -351,49 +364,13 @@ func runManagedCodex(executable codexExecutable, args []string) error {
 	if err != nil {
 		return fmt.Errorf("starting Codex bridge listener: %w", err)
 	}
-	proxy := &codexProxy{
-		bridge:        bridge,
-		upstreamURL:   upstreamURL,
-		tuiRequests:   make(map[string]string),
-		webRequestIds: make(map[string]struct{}),
-	}
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
-			return splitErr == nil && (host == "127.0.0.1" || host == "::1")
-		},
-	}
-	var accepted atomic.Bool
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !accepted.CompareAndSwap(false, true) {
-			http.Error(w, "Codex bridge already connected", http.StatusConflict)
-			return
-		}
-		client, upgradeErr := upgrader.Upgrade(w, r, nil)
-		if upgradeErr != nil {
-			return
-		}
-		upstream, _, dialErr := websocket.DefaultDialer.Dial(upstreamURL, nil)
-		if dialErr != nil {
-			_ = client.WriteControl(websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, dialErr.Error()),
-				time.Now().Add(time.Second))
-			_ = client.Close()
-			return
-		}
-		proxy.upstream = upstream
-		go proxy.pollActions()
-		proxy.run(client)
-	})
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	proxyHost := newCodexProxyHost(bridge, upstreamURL)
+	server := &http.Server{Handler: proxyHost, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		_ = server.Serve(proxyListener)
 	}()
 	defer func() {
-		proxy.closed.Store(true)
-		if proxy.upstream != nil {
-			_ = proxy.upstream.Close()
-		}
+		proxyHost.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		_ = server.Shutdown(shutdownCtx)
 		cancel()
@@ -409,6 +386,81 @@ func runManagedCodex(executable codexExecutable, args []string) error {
 	tui.Stderr = os.Stderr
 	tui.Env = os.Environ()
 	return waitForCodex(tui)
+}
+
+func newCodexProxyHost(bridge *codexBridge, upstreamURL string) *codexProxyHost {
+	return &codexProxyHost{
+		bridge:      bridge,
+		upstreamURL: upstreamURL,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+				return splitErr == nil && (host == "127.0.0.1" || host == "::1")
+			},
+		},
+	}
+}
+
+func (host *codexProxyHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The Codex resume/fork picker owns a temporary app-server connection and
+	// deliberately reconnects after a selection. Serialize connections so that
+	// this handoff works without allowing two TUIs to share one bridge.
+	host.connectionLock.Lock()
+	defer host.connectionLock.Unlock()
+	if host.closed.Load() {
+		http.Error(w, "Codex bridge is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	client, err := host.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	upstream, _, err := websocket.DefaultDialer.Dial(host.upstreamURL, nil)
+	if err != nil {
+		_ = client.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()),
+			time.Now().Add(time.Second),
+		)
+		_ = client.Close()
+		return
+	}
+	proxy := &codexProxy{
+		bridge:        host.bridge,
+		upstream:      upstream,
+		tuiRequests:   make(map[string]string),
+		webRequestIds: make(map[string]struct{}),
+	}
+	proxy.pollFn = proxy.pollActions
+
+	host.activeLock.Lock()
+	if host.closed.Load() {
+		host.activeLock.Unlock()
+		_ = upstream.Close()
+		_ = client.Close()
+		return
+	}
+	host.active = proxy
+	host.activeLock.Unlock()
+
+	proxy.run(client)
+
+	host.activeLock.Lock()
+	if host.active == proxy {
+		host.active = nil
+	}
+	host.activeLock.Unlock()
+}
+
+func (host *codexProxyHost) Close() {
+	host.closed.Store(true)
+	host.activeLock.Lock()
+	proxy := host.active
+	host.activeLock.Unlock()
+	if proxy != nil {
+		proxy.closed.Store(true)
+		_ = proxy.upstream.Close()
+	}
 }
 
 func codexBlockName(meta waveobj.MetaMapType) string {
@@ -511,7 +563,7 @@ func (bridge *codexBridge) reportLoop() {
 	defer close(bridge.reporterDone)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	pendingDeltas := make(map[string]agentDeltaReport)
+	pendingDeltas := make(map[string]codexDeltaReport)
 	send := func(report bridgeReport) {
 		_ = wshclient.CodexSessionEventCommand(RpcClient, wshrpc.CodexSessionEventData{
 			BridgeId: bridge.bridgeId,
@@ -524,7 +576,7 @@ func (bridge *codexBridge) reportLoop() {
 		for key, delta := range pendingDeltas {
 			params, _ := json.Marshal(delta)
 			envelope, _ := json.Marshal(map[string]any{
-				"method": "item/agentMessage/delta",
+				"method": delta.Method,
 				"params": json.RawMessage(params),
 			})
 			send(bridgeReport{kind: "notification", data: string(envelope)})
@@ -532,14 +584,14 @@ func (bridge *codexBridge) reportLoop() {
 		}
 	}
 	handle := func(report bridgeReport) {
-		if delta, ok := parseAgentDeltaReport(report); ok {
-			existing := pendingDeltas[delta.ItemId]
+		if delta, key, ok := parseCodexDeltaReport(report); ok {
+			existing := pendingDeltas[key]
 			if existing.ItemId == "" {
 				existing = delta
 			} else {
 				existing.Delta += delta.Delta
 			}
-			pendingDeltas[delta.ItemId] = existing
+			pendingDeltas[key] = existing
 			return
 		}
 		flushDeltas()
@@ -565,20 +617,31 @@ func (bridge *codexBridge) reportLoop() {
 	}
 }
 
-func parseAgentDeltaReport(report bridgeReport) (agentDeltaReport, bool) {
+func parseCodexDeltaReport(report bridgeReport) (codexDeltaReport, string, bool) {
 	if report.kind != "notification" {
-		return agentDeltaReport{}, false
+		return codexDeltaReport{}, "", false
 	}
 	var envelope struct {
 		Method string           `json:"method"`
-		Params agentDeltaReport `json:"params"`
+		Params codexDeltaReport `json:"params"`
 	}
-	if json.Unmarshal([]byte(report.data), &envelope) != nil ||
-		envelope.Method != "item/agentMessage/delta" ||
-		envelope.Params.ItemId == "" {
-		return agentDeltaReport{}, false
+	if json.Unmarshal([]byte(report.data), &envelope) != nil || envelope.Params.ItemId == "" {
+		return codexDeltaReport{}, "", false
 	}
-	return envelope.Params, true
+	switch envelope.Method {
+	case "item/agentMessage/delta",
+		"item/plan/delta",
+		"item/commandExecution/outputDelta",
+		"item/reasoning/summaryTextDelta":
+	default:
+		return codexDeltaReport{}, "", false
+	}
+	envelope.Params.Method = envelope.Method
+	key := envelope.Method + "\x00" + envelope.Params.ItemId
+	if envelope.Params.SummaryIndex != nil {
+		key += fmt.Sprintf("\x00%d", *envelope.Params.SummaryIndex)
+	}
+	return envelope.Params, key, true
 }
 
 func (proxy *codexProxy) run(client *websocket.Conn) {
@@ -595,6 +658,15 @@ func (proxy *codexProxy) run(client *websocket.Conn) {
 	}()
 	<-done
 	proxy.closed.Store(true)
+}
+
+func (proxy *codexProxy) startPolling() {
+	if proxy.pollFn == nil {
+		return
+	}
+	proxy.pollOnce.Do(func() {
+		go proxy.pollFn()
+	})
 }
 
 func (proxy *codexProxy) clientToServer(client *websocket.Conn) {
@@ -654,6 +726,10 @@ func (proxy *codexProxy) observeServerMessage(message []byte) bool {
 		if (tuiMethod == "thread/start" || tuiMethod == "thread/resume" || tuiMethod == "thread/fork") &&
 			len(envelope.Result) != 0 && string(envelope.Result) != "null" {
 			proxy.bridge.queue("snapshot", string(envelope.Result))
+			// Picker connections only list/read threads and are intentionally
+			// short-lived. Start Web action polling after the persistent thread
+			// connection is known so a closing picker cannot consume an action.
+			proxy.startPolling()
 		}
 		return false
 	}
@@ -751,9 +827,15 @@ func shouldReportCodexNotification(method string) bool {
 		"thread/closed",
 		"turn/started",
 		"turn/completed",
+		"turn/plan/updated",
 		"item/started",
 		"item/completed",
-		"item/agentMessage/delta":
+		"item/agentMessage/delta",
+		"item/plan/delta",
+		"item/reasoning/summaryTextDelta",
+		"item/commandExecution/outputDelta",
+		"item/fileChange/patchUpdated",
+		"item/mcpToolCall/progress":
 		return true
 	default:
 		return false

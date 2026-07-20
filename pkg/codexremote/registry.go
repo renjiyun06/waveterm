@@ -4,6 +4,7 @@
 package codexremote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,15 +14,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc"
 )
 
 const (
-	maxMessageBytes = 64 * 1024
-	sessionTTL      = 45 * time.Second
-	pollWait        = 25 * time.Second
+	maxMessageBytes       = 64 * 1024
+	maxActivityDetailSize = 512 * 1024
+	sessionTTL            = 45 * time.Second
+	pollWait              = 25 * time.Second
+	detailTruncationMark  = "\n\n… 内容过长，已保留开头和末尾 …\n\n"
 )
 
 var defaultRegistry = NewRegistry()
@@ -29,9 +33,17 @@ var defaultRegistry = NewRegistry()
 type Message struct {
 	Id        string `json:"id"`
 	Role      string `json:"role"`
+	Kind      string `json:"kind,omitempty"`
+	ToolType  string `json:"toolType,omitempty"`
+	Title     string `json:"title,omitempty"`
 	Text      string `json:"text"`
+	Input     string `json:"input,omitempty"`
+	Output    string `json:"output,omitempty"`
 	Status    string `json:"status,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 	CreatedAt int64  `json:"createdAt"`
+
+	summaryIndex int
 }
 
 type Session struct {
@@ -90,15 +102,49 @@ type remoteTurn struct {
 }
 
 type remoteItem struct {
-	Id      string            `json:"id"`
-	Type    string            `json:"type"`
-	Text    string            `json:"text"`
-	Content []remoteUserInput `json:"content"`
+	Id                string             `json:"id"`
+	Type              string             `json:"type"`
+	Text              string             `json:"text"`
+	Content           json.RawMessage    `json:"content"`
+	Summary           []string           `json:"summary"`
+	Command           string             `json:"command"`
+	Cwd               string             `json:"cwd"`
+	Status            string             `json:"status"`
+	AggregatedOutput  string             `json:"aggregatedOutput"`
+	ExitCode          *int               `json:"exitCode"`
+	DurationMs        *int64             `json:"durationMs"`
+	Changes           []remoteFileChange `json:"changes"`
+	Server            string             `json:"server"`
+	Tool              string             `json:"tool"`
+	Arguments         json.RawMessage    `json:"arguments"`
+	Result            json.RawMessage    `json:"result"`
+	Error             json.RawMessage    `json:"error"`
+	Namespace         *string            `json:"namespace"`
+	ContentItems      json.RawMessage    `json:"contentItems"`
+	Success           *bool              `json:"success"`
+	Query             string             `json:"query"`
+	Action            json.RawMessage    `json:"action"`
+	Prompt            *string            `json:"prompt"`
+	Model             *string            `json:"model"`
+	ReceiverThreadIds []string           `json:"receiverThreadIds"`
+	AgentsStates      json.RawMessage    `json:"agentsStates"`
+	Path              string             `json:"path"`
 }
 
 type remoteUserInput struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+type remoteFileChange struct {
+	Path string          `json:"path"`
+	Kind json.RawMessage `json:"kind"`
+	Diff string          `json:"diff"`
+}
+
+type remotePlanStep struct {
+	Step   string `json:"step"`
+	Status string `json:"status"`
 }
 
 func NewRegistry() *Registry {
@@ -350,7 +396,7 @@ func (r *Registry) pruneLocked() {
 }
 
 func cloneSession(session Session) Session {
-	session.Messages = append([]Message(nil), session.Messages...)
+	session.Messages = append(make([]Message, 0, len(session.Messages)), session.Messages...)
 	return session
 }
 
@@ -376,7 +422,7 @@ func applySnapshot(session *Session, data []byte) error {
 	session.ActiveTurnId = ""
 	for _, turn := range response.Thread.Turns {
 		for _, item := range turn.Items {
-			upsertRemoteItem(session, item, turnTimestamp(turn))
+			upsertRemoteItem(session, item, turnTimestamp(turn), "completed")
 		}
 		if turn.Status == "inProgress" {
 			session.ActiveTurnId = turn.Id
@@ -442,7 +488,7 @@ func applyNotification(session *Session, data []byte) error {
 		session.State = "working"
 		session.Error = ""
 		for _, item := range params.Turn.Items {
-			upsertRemoteItem(session, item, turnTimestamp(params.Turn))
+			upsertRemoteItem(session, item, turnTimestamp(params.Turn), "inProgress")
 		}
 	case "turn/completed":
 		var params struct {
@@ -452,7 +498,7 @@ func applyNotification(session *Session, data []byte) error {
 			return err
 		}
 		for _, item := range params.Turn.Items {
-			upsertRemoteItem(session, item, turnTimestamp(params.Turn))
+			upsertRemoteItem(session, item, turnTimestamp(params.Turn), "completed")
 		}
 		if session.ActiveTurnId == params.Turn.Id {
 			session.ActiveTurnId = ""
@@ -471,7 +517,11 @@ func applyNotification(session *Session, data []byte) error {
 		if timestamp == 0 {
 			timestamp = params.CompletedAt
 		}
-		upsertRemoteItem(session, params.Item, timestamp)
+		lifecycleStatus := "inProgress"
+		if envelope.Method == "item/completed" {
+			lifecycleStatus = "completed"
+		}
+		upsertRemoteItem(session, params.Item, timestamp, lifecycleStatus)
 	case "item/agentMessage/delta":
 		var params struct {
 			ItemId string `json:"itemId"`
@@ -481,6 +531,69 @@ func applyNotification(session *Session, data []byte) error {
 			return err
 		}
 		appendAgentDelta(session, params.ItemId, params.Delta)
+	case "item/reasoning/summaryTextDelta":
+		var params struct {
+			ItemId       string `json:"itemId"`
+			Delta        string `json:"delta"`
+			SummaryIndex int    `json:"summaryIndex"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		appendReasoningDelta(session, params.ItemId, params.Delta, params.SummaryIndex)
+	case "item/plan/delta":
+		var params struct {
+			ItemId string `json:"itemId"`
+			Delta  string `json:"delta"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		appendPlanDelta(session, params.ItemId, params.Delta)
+	case "item/commandExecution/outputDelta":
+		var params struct {
+			ItemId string `json:"itemId"`
+			Delta  string `json:"delta"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		appendToolOutput(session, params.ItemId, params.Delta, "command", "终端命令")
+	case "item/fileChange/patchUpdated":
+		var params struct {
+			ItemId  string             `json:"itemId"`
+			Changes []remoteFileChange `json:"changes"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		upsertRemoteItem(session, remoteItem{
+			Id:      params.ItemId,
+			Type:    "fileChange",
+			Status:  "inProgress",
+			Changes: params.Changes,
+		}, 0, "inProgress")
+	case "item/mcpToolCall/progress":
+		var params struct {
+			ItemId  string `json:"itemId"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		if strings.TrimSpace(params.Message) != "" {
+			appendToolOutput(session, params.ItemId, params.Message+"\n", "mcp", "MCP 工具")
+		}
+	case "turn/plan/updated":
+		var params struct {
+			TurnId      string           `json:"turnId"`
+			Explanation *string          `json:"explanation"`
+			Plan        []remotePlanStep `json:"plan"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		upsertTurnPlan(session, params.TurnId, params.Explanation, params.Plan)
 	case "error":
 		var params struct {
 			Error struct {
@@ -549,65 +662,426 @@ func refreshSessionTitle(session *Session) {
 	session.Title = fallbackTitle(session.BlockId, session.Cwd, "")
 }
 
-func upsertRemoteItem(session *Session, item remoteItem, timestamp int64) {
-	var role string
-	var text string
-	switch item.Type {
-	case "userMessage":
-		role = "user"
-		text = userInputText(item.Content)
-	case "agentMessage":
-		role = "assistant"
-		text = item.Text
-	default:
-		return
-	}
+func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecycleStatus string) {
 	if item.Id == "" {
 		return
 	}
-	if timestamp == 0 {
-		timestamp = time.Now().UnixMilli()
-	} else if timestamp < 10_000_000_000 {
-		timestamp *= 1000
+	status := item.Status
+	if status == "" {
+		status = lifecycleStatus
 	}
-	for index := range session.Messages {
-		if session.Messages[index].Id == item.Id {
-			session.Messages[index].Role = role
-			session.Messages[index].Text = text
-			session.Messages[index].Status = "completed"
+	if status == "" {
+		status = "completed"
+	}
+	message := Message{
+		Id:        item.Id,
+		Role:      "assistant",
+		Status:    status,
+		CreatedAt: normalizeTimestamp(timestamp),
+	}
+	switch item.Type {
+	case "userMessage":
+		message.Role = "user"
+		message.Kind = "message"
+		message.Text = userInputText(item.Content)
+	case "agentMessage":
+		message.Kind = "message"
+		message.Text = item.Text
+	case "reasoning":
+		message.Kind = "reasoning"
+		message.Title = "思考"
+		message.Text = joinNonEmpty(item.Summary)
+		message.summaryIndex = max(0, len(item.Summary)-1)
+		if message.Text == "" && status != "inProgress" && findMessage(session, item.Id) == nil {
 			return
 		}
+	case "plan":
+		message.Kind = "plan"
+		message.Title = "计划"
+		message.Text = item.Text
+		if message.Text == "" && status != "inProgress" && findMessage(session, item.Id) == nil {
+			return
+		}
+	case "commandExecution":
+		message.Kind = "tool"
+		message.ToolType = "command"
+		message.Title = "终端命令"
+		message.Text = item.Command
+		if item.Cwd != "" {
+			message.Input = "工作目录: " + item.Cwd
+		}
+		message.Output = item.AggregatedOutput
+		if item.ExitCode != nil {
+			message.Output = strings.TrimRight(message.Output, "\n")
+			if message.Output != "" {
+				message.Output += "\n\n"
+			}
+			message.Output += fmt.Sprintf("退出码: %d", *item.ExitCode)
+		}
+	case "fileChange":
+		message.Kind = "tool"
+		message.ToolType = "file"
+		message.Title, message.Text, message.Output = formatFileChanges(item.Changes)
+	case "mcpToolCall":
+		message.Kind = "tool"
+		message.ToolType = "mcp"
+		message.Title = strings.Trim(strings.Join([]string{"MCP", item.Server, item.Tool}, " · "), " ·")
+		message.Text = strings.Trim(strings.Join([]string{item.Server, item.Tool}, " / "), " /")
+		message.Input = prettyJSON(item.Arguments)
+		if !rawJSONEmpty(item.Error) {
+			message.Output = "错误\n" + prettyJSON(item.Error)
+		} else {
+			message.Output = prettyJSON(item.Result)
+		}
+	case "dynamicToolCall":
+		message.Kind = "tool"
+		message.ToolType = "dynamic"
+		toolName := item.Tool
+		if item.Namespace != nil && strings.TrimSpace(*item.Namespace) != "" {
+			toolName = strings.TrimSpace(*item.Namespace) + " / " + toolName
+		}
+		message.Title = "工具 · " + toolName
+		message.Text = toolName
+		message.Input = prettyJSON(item.Arguments)
+		message.Output = prettyJSON(item.ContentItems)
+	case "collabAgentToolCall":
+		message.Kind = "tool"
+		message.ToolType = "collab"
+		message.Title = "协作代理 · " + item.Tool
+		if item.Prompt != nil {
+			message.Text = strings.TrimSpace(*item.Prompt)
+		}
+		input := map[string]any{"receivers": item.ReceiverThreadIds}
+		if item.Model != nil {
+			input["model"] = *item.Model
+		}
+		message.Input = prettyValue(input)
+		message.Output = prettyJSON(item.AgentsStates)
+	case "webSearch":
+		message.Kind = "tool"
+		message.ToolType = "web"
+		message.Title = "Web 搜索"
+		message.Text = item.Query
+		message.Input = prettyJSON(item.Action)
+	case "imageView":
+		message.Kind = "tool"
+		message.ToolType = "image"
+		message.Title = "查看图片"
+		message.Text = item.Path
+	case "sleep":
+		message.Kind = "tool"
+		message.ToolType = "wait"
+		message.Title = "等待"
+		if item.DurationMs != nil {
+			message.Text = fmt.Sprintf("%d ms", *item.DurationMs)
+		}
+	case "contextCompaction":
+		message.Kind = "tool"
+		message.ToolType = "context"
+		message.Title = "压缩上下文"
+		message.Text = "Codex 已整理会话上下文"
+	default:
+		return
 	}
-	session.Messages = append(session.Messages, Message{
-		Id:        item.Id,
-		Role:      role,
-		Text:      text,
-		Status:    "completed",
-		CreatedAt: timestamp,
-	})
+	message.Input, message.Truncated = limitActivityDetail(message.Input)
+	var outputTruncated bool
+	message.Output, outputTruncated = limitActivityDetail(message.Output)
+	message.Truncated = message.Truncated || outputTruncated
+	upsertMessage(session, message)
+}
+
+func upsertMessage(session *Session, message Message) {
+	for index := range session.Messages {
+		if session.Messages[index].Id != message.Id {
+			continue
+		}
+		existing := session.Messages[index]
+		message.CreatedAt = existing.CreatedAt
+		if message.Text == "" {
+			message.Text = existing.Text
+		}
+		if message.Title == "" {
+			message.Title = existing.Title
+		}
+		if message.Input == "" {
+			message.Input = existing.Input
+		}
+		if message.Output == "" {
+			message.Output = existing.Output
+		}
+		if message.Status == "" {
+			message.Status = existing.Status
+		}
+		if message.summaryIndex == 0 && existing.summaryIndex > 0 {
+			message.summaryIndex = existing.summaryIndex
+		}
+		message.Truncated = message.Truncated || existing.Truncated
+		session.Messages[index] = message
+		return
+	}
+	session.Messages = append(session.Messages, message)
+}
+
+func findMessage(session *Session, itemId string) *Message {
+	for index := range session.Messages {
+		if session.Messages[index].Id == itemId {
+			return &session.Messages[index]
+		}
+	}
+	return nil
 }
 
 func appendAgentDelta(session *Session, itemId string, delta string) {
 	if itemId == "" || delta == "" {
 		return
 	}
-	for index := range session.Messages {
-		if session.Messages[index].Id == itemId {
-			session.Messages[index].Text += delta
-			session.Messages[index].Status = "streaming"
-			return
-		}
+	if message := findMessage(session, itemId); message != nil {
+		message.Text += delta
+		message.Status = "streaming"
+		return
 	}
 	session.Messages = append(session.Messages, Message{
 		Id:        itemId,
 		Role:      "assistant",
+		Kind:      "message",
 		Text:      delta,
 		Status:    "streaming",
 		CreatedAt: time.Now().UnixMilli(),
 	})
 }
 
-func userInputText(content []remoteUserInput) string {
+func appendReasoningDelta(session *Session, itemId string, delta string, summaryIndex int) {
+	if itemId == "" || delta == "" {
+		return
+	}
+	if message := findMessage(session, itemId); message != nil {
+		if message.Text != "" && summaryIndex > message.summaryIndex {
+			message.Text += "\n\n"
+		}
+		message.Text += delta
+		message.summaryIndex = summaryIndex
+		message.Status = "streaming"
+		return
+	}
+	session.Messages = append(session.Messages, Message{
+		Id:           itemId,
+		Role:         "assistant",
+		Kind:         "reasoning",
+		Title:        "思考",
+		Text:         delta,
+		Status:       "streaming",
+		CreatedAt:    time.Now().UnixMilli(),
+		summaryIndex: summaryIndex,
+	})
+}
+
+func appendPlanDelta(session *Session, itemId string, delta string) {
+	if itemId == "" || delta == "" {
+		return
+	}
+	if message := findMessage(session, itemId); message != nil {
+		message.Text += delta
+		message.Status = "streaming"
+		return
+	}
+	session.Messages = append(session.Messages, Message{
+		Id:        itemId,
+		Role:      "assistant",
+		Kind:      "plan",
+		Title:     "计划",
+		Text:      delta,
+		Status:    "streaming",
+		CreatedAt: time.Now().UnixMilli(),
+	})
+}
+
+func appendToolOutput(session *Session, itemId string, delta string, toolType string, title string) {
+	if itemId == "" || delta == "" {
+		return
+	}
+	if message := findMessage(session, itemId); message != nil {
+		var truncated bool
+		message.Output, truncated = appendActivityDetail(message.Output, delta)
+		message.Truncated = message.Truncated || truncated
+		message.Status = "inProgress"
+		return
+	}
+	output, truncated := limitActivityDetail(delta)
+	session.Messages = append(session.Messages, Message{
+		Id:        itemId,
+		Role:      "assistant",
+		Kind:      "tool",
+		ToolType:  toolType,
+		Title:     title,
+		Output:    output,
+		Status:    "inProgress",
+		Truncated: truncated,
+		CreatedAt: time.Now().UnixMilli(),
+	})
+}
+
+func upsertTurnPlan(session *Session, turnId string, explanation *string, steps []remotePlanStep) {
+	if turnId == "" || (explanation == nil && len(steps) == 0) {
+		return
+	}
+	parts := make([]string, 0, len(steps)+1)
+	if explanation != nil && strings.TrimSpace(*explanation) != "" {
+		parts = append(parts, strings.TrimSpace(*explanation))
+	}
+	status := "completed"
+	for _, step := range steps {
+		marker := "○"
+		switch step.Status {
+		case "inProgress":
+			marker = "◉"
+			status = "streaming"
+		case "completed":
+			marker = "✓"
+		}
+		parts = append(parts, marker+" "+step.Step)
+	}
+	upsertMessage(session, Message{
+		Id:        "turn-plan:" + turnId,
+		Role:      "assistant",
+		Kind:      "plan",
+		Title:     "计划",
+		Text:      strings.Join(parts, "\n"),
+		Status:    status,
+		CreatedAt: time.Now().UnixMilli(),
+	})
+}
+
+func formatFileChanges(changes []remoteFileChange) (string, string, string) {
+	title := "文件修改"
+	if len(changes) != 0 {
+		title = fmt.Sprintf("文件修改 · %d 个文件", len(changes))
+	}
+	paths := make([]string, 0, len(changes))
+	details := make([]string, 0, len(changes))
+	for _, change := range changes {
+		if change.Path == "" {
+			continue
+		}
+		kind := fileChangeKind(change.Kind)
+		paths = append(paths, kind+" "+change.Path)
+		detail := kind + " " + change.Path
+		if change.Diff != "" {
+			detail += "\n" + change.Diff
+		}
+		details = append(details, detail)
+	}
+	return title, strings.Join(paths, "\n"), strings.Join(details, "\n\n")
+}
+
+func fileChangeKind(raw json.RawMessage) string {
+	var value struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		return "修改"
+	}
+	switch value.Type {
+	case "add":
+		return "新增"
+	case "delete":
+		return "删除"
+	default:
+		return "修改"
+	}
+}
+
+func joinNonEmpty(values []string) string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, value)
+		}
+	}
+	return strings.Join(result, "\n\n")
+}
+
+func prettyJSON(raw json.RawMessage) string {
+	if rawJSONEmpty(raw) {
+		return ""
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return string(raw)
+	}
+	return prettyValue(value)
+}
+
+func prettyValue(value any) string {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func rawJSONEmpty(raw json.RawMessage) bool {
+	value := bytes.TrimSpace(raw)
+	return len(value) == 0 || bytes.Equal(value, []byte("null"))
+}
+
+func normalizeTimestamp(timestamp int64) int64 {
+	if timestamp == 0 {
+		return time.Now().UnixMilli()
+	}
+	if timestamp < 10_000_000_000 {
+		return timestamp * 1000
+	}
+	return timestamp
+}
+
+func limitActivityDetail(value string) (string, bool) {
+	if len(value) <= maxActivityDetailSize {
+		return value, false
+	}
+	headBudget := maxActivityDetailSize / 3
+	tailBudget := maxActivityDetailSize - headBudget - len(detailTruncationMark)
+	head := validUTF8Prefix(value, headBudget)
+	tail := validUTF8Suffix(value, tailBudget)
+	return head + detailTruncationMark + tail, true
+}
+
+func appendActivityDetail(current string, delta string) (string, bool) {
+	if marker := strings.Index(current, detailTruncationMark); marker >= 0 {
+		head := current[:marker]
+		tail := current[marker+len(detailTruncationMark):] + delta
+		tailBudget := maxActivityDetailSize - len(head) - len(detailTruncationMark)
+		return head + detailTruncationMark + validUTF8Suffix(tail, tailBudget), true
+	}
+	return limitActivityDetail(current + delta)
+}
+
+func validUTF8Prefix(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	end := limit
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end]
+}
+
+func validUTF8Suffix(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	start := len(value) - limit
+	for start < len(value) && !utf8.RuneStart(value[start]) {
+		start++
+	}
+	return value[start:]
+}
+
+func userInputText(raw json.RawMessage) string {
+	var content []remoteUserInput
+	if json.Unmarshal(raw, &content) != nil {
+		return ""
+	}
 	parts := make([]string, 0, len(content))
 	for _, input := range content {
 		if input.Type == "text" && input.Text != "" {
