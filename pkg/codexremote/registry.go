@@ -53,21 +53,25 @@ type PlanStep struct {
 }
 
 type Session struct {
-	BlockId      string    `json:"blockId"`
-	TabId        string    `json:"tabId,omitempty"`
-	WorkspaceId  string    `json:"workspaceId,omitempty"`
-	Connection   string    `json:"connection,omitempty"`
-	BlockName    string    `json:"blockName,omitempty"`
-	ThreadId     string    `json:"threadId,omitempty"`
-	Title        string    `json:"title"`
-	Cwd          string    `json:"cwd,omitempty"`
-	State        string    `json:"state"`
-	ActiveTurnId string    `json:"activeTurnId,omitempty"`
-	Error        string    `json:"error,omitempty"`
-	UpdatedAt    int64     `json:"updatedAt"`
-	Revision     int64     `json:"revision"`
-	Messages     []Message `json:"messages"`
-	threadTitle  string
+	BlockId         string    `json:"blockId"`
+	TabId           string    `json:"tabId,omitempty"`
+	WorkspaceId     string    `json:"workspaceId,omitempty"`
+	Connection      string    `json:"connection,omitempty"`
+	BlockName       string    `json:"blockName,omitempty"`
+	ThreadId        string    `json:"threadId,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	ReasoningEffort string    `json:"reasoningEffort,omitempty"`
+	ContextTokens   int64     `json:"contextTokens"`
+	ContextWindow   int64     `json:"contextWindow"`
+	Title           string    `json:"title"`
+	Cwd             string    `json:"cwd,omitempty"`
+	State           string    `json:"state"`
+	ActiveTurnId    string    `json:"activeTurnId,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	UpdatedAt       int64     `json:"updatedAt"`
+	Revision        int64     `json:"revision"`
+	Messages        []Message `json:"messages"`
+	threadTitle     string
 }
 
 type sessionState struct {
@@ -108,33 +112,42 @@ type remoteTurn struct {
 }
 
 type remoteItem struct {
-	Id                string             `json:"id"`
-	Type              string             `json:"type"`
-	Text              string             `json:"text"`
-	Content           json.RawMessage    `json:"content"`
-	Summary           []string           `json:"summary"`
-	Command           string             `json:"command"`
-	Cwd               string             `json:"cwd"`
-	Status            string             `json:"status"`
-	AggregatedOutput  string             `json:"aggregatedOutput"`
-	ExitCode          *int               `json:"exitCode"`
-	DurationMs        *int64             `json:"durationMs"`
-	Changes           []remoteFileChange `json:"changes"`
-	Server            string             `json:"server"`
-	Tool              string             `json:"tool"`
-	Arguments         json.RawMessage    `json:"arguments"`
-	Result            json.RawMessage    `json:"result"`
-	Error             json.RawMessage    `json:"error"`
-	Namespace         *string            `json:"namespace"`
-	ContentItems      json.RawMessage    `json:"contentItems"`
-	Success           *bool              `json:"success"`
-	Query             string             `json:"query"`
-	Action            json.RawMessage    `json:"action"`
-	Prompt            *string            `json:"prompt"`
-	Model             *string            `json:"model"`
-	ReceiverThreadIds []string           `json:"receiverThreadIds"`
-	AgentsStates      json.RawMessage    `json:"agentsStates"`
-	Path              string             `json:"path"`
+	Id                string                `json:"id"`
+	Type              string                `json:"type"`
+	Text              string                `json:"text"`
+	Content           json.RawMessage       `json:"content"`
+	Summary           []string              `json:"summary"`
+	Command           string                `json:"command"`
+	CommandActions    []remoteCommandAction `json:"commandActions"`
+	Cwd               string                `json:"cwd"`
+	Status            string                `json:"status"`
+	AggregatedOutput  string                `json:"aggregatedOutput"`
+	ExitCode          *int                  `json:"exitCode"`
+	DurationMs        *int64                `json:"durationMs"`
+	Changes           []remoteFileChange    `json:"changes"`
+	Server            string                `json:"server"`
+	Tool              string                `json:"tool"`
+	Arguments         json.RawMessage       `json:"arguments"`
+	Result            json.RawMessage       `json:"result"`
+	Error             json.RawMessage       `json:"error"`
+	Namespace         *string               `json:"namespace"`
+	ContentItems      json.RawMessage       `json:"contentItems"`
+	Success           *bool                 `json:"success"`
+	Query             string                `json:"query"`
+	Action            json.RawMessage       `json:"action"`
+	Prompt            *string               `json:"prompt"`
+	Model             *string               `json:"model"`
+	ReceiverThreadIds []string              `json:"receiverThreadIds"`
+	AgentsStates      json.RawMessage       `json:"agentsStates"`
+	Path              string                `json:"path"`
+}
+
+type remoteCommandAction struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Query   string `json:"query"`
 }
 
 type remoteUserInput struct {
@@ -229,6 +242,8 @@ func (r *Registry) ApplyEvent(data wshrpc.CodexSessionEventData) error {
 	switch data.Kind {
 	case "snapshot":
 		err = applySnapshot(&session.Session, []byte(data.Data))
+	case "history-snapshot":
+		err = applyHistorySnapshot(&session.Session, []byte(data.Data))
 	case "notification":
 		err = applyNotification(&session.Session, []byte(data.Data))
 	case "action-error":
@@ -406,8 +421,10 @@ func cloneSession(session Session) Session {
 
 func applySnapshot(session *Session, data []byte) error {
 	var response struct {
-		Thread remoteThread `json:"thread"`
-		Cwd    string       `json:"cwd"`
+		Thread          remoteThread `json:"thread"`
+		Cwd             string       `json:"cwd"`
+		Model           string       `json:"model"`
+		ReasoningEffort *string      `json:"reasoningEffort"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
 		return fmt.Errorf("decoding codex thread snapshot: %w", err)
@@ -416,6 +433,12 @@ func applySnapshot(session *Session, data []byte) error {
 		return errors.New("codex thread snapshot has no thread id")
 	}
 	session.ThreadId = response.Thread.Id
+	if strings.TrimSpace(response.Model) != "" {
+		session.Model = strings.TrimSpace(response.Model)
+	}
+	if response.ReasoningEffort != nil {
+		session.ReasoningEffort = strings.TrimSpace(*response.ReasoningEffort)
+	}
 	if response.Thread.Cwd != "" {
 		session.Cwd = response.Thread.Cwd
 	} else if response.Cwd != "" {
@@ -438,6 +461,21 @@ func applySnapshot(session *Session, data []byte) error {
 	}
 	session.Error = ""
 	return nil
+}
+
+func applyHistorySnapshot(session *Session, data []byte) error {
+	var response struct {
+		Thread struct {
+			Id string `json:"id"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fmt.Errorf("decoding Codex history snapshot: %w", err)
+	}
+	if session.ThreadId != "" && response.Thread.Id != session.ThreadId {
+		return fmt.Errorf("Codex history snapshot thread %q does not match active thread %q", response.Thread.Id, session.ThreadId)
+	}
+	return applySnapshot(session, data)
 }
 
 func applyNotification(session *Session, data []byte) error {
@@ -481,6 +519,46 @@ func applyNotification(session *Session, data []byte) error {
 			return err
 		}
 		applyThreadStatus(session, params.Status)
+	case "thread/tokenUsage/updated":
+		var params struct {
+			ThreadId   string `json:"threadId"`
+			TokenUsage struct {
+				Last struct {
+					TotalTokens int64 `json:"totalTokens"`
+				} `json:"last"`
+				ModelContextWindow *int64 `json:"modelContextWindow"`
+			} `json:"tokenUsage"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		if !threadMatches(session, params.ThreadId) {
+			return nil
+		}
+		session.ContextTokens = max(0, params.TokenUsage.Last.TotalTokens)
+		if params.TokenUsage.ModelContextWindow != nil {
+			session.ContextWindow = max(0, *params.TokenUsage.ModelContextWindow)
+		}
+	case "thread/settings/updated":
+		var params struct {
+			ThreadId       string `json:"threadId"`
+			ThreadSettings struct {
+				Model  string  `json:"model"`
+				Effort *string `json:"effort"`
+			} `json:"threadSettings"`
+		}
+		if err := json.Unmarshal(envelope.Params, &params); err != nil {
+			return err
+		}
+		if !threadMatches(session, params.ThreadId) {
+			return nil
+		}
+		if strings.TrimSpace(params.ThreadSettings.Model) != "" {
+			session.Model = strings.TrimSpace(params.ThreadSettings.Model)
+		}
+		if params.ThreadSettings.Effort != nil {
+			session.ReasoningEffort = strings.TrimSpace(*params.ThreadSettings.Effort)
+		}
 	case "turn/started":
 		var params struct {
 			Turn remoteTurn `json:"turn"`
@@ -616,6 +694,11 @@ func applyNotification(session *Session, data []byte) error {
 	return nil
 }
 
+func threadMatches(session *Session, threadId string) bool {
+	threadId = strings.TrimSpace(threadId)
+	return threadId != "" && (session.ThreadId == "" || threadId == session.ThreadId)
+}
+
 func applyThreadStatus(session *Session, raw json.RawMessage) {
 	if len(raw) == 0 {
 		return
@@ -696,9 +779,6 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 		message.Title = "思考"
 		message.Text = joinNonEmpty(item.Summary)
 		message.summaryIndex = max(0, len(item.Summary)-1)
-		if message.Text == "" && status != "inProgress" && findMessage(session, item.Id) == nil {
-			return
-		}
 	case "plan":
 		message.Kind = "plan"
 		message.Title = "计划"
@@ -709,11 +789,8 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 	case "commandExecution":
 		message.Kind = "tool"
 		message.ToolType = "command"
-		message.Title = "终端命令"
-		message.Text = item.Command
-		if item.Cwd != "" {
-			message.Input = "工作目录: " + item.Cwd
-		}
+		message.Title, message.Text = formatCommandActions(item.CommandActions, item.Command)
+		message.Input = formatCommandInput(item.Command, item.Cwd)
 		message.Output = item.AggregatedOutput
 		if item.ExitCode != nil {
 			message.Output = strings.TrimRight(message.Output, "\n")
@@ -732,6 +809,7 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 		message.Title = strings.Trim(strings.Join([]string{"MCP", item.Server, item.Tool}, " · "), " ·")
 		message.Text = strings.Trim(strings.Join([]string{item.Server, item.Tool}, " / "), " /")
 		message.Input = prettyJSON(item.Arguments)
+		applyToolActivitySummary(&message, item.Tool, item.Arguments)
 		if !rawJSONEmpty(item.Error) {
 			message.Output = "错误\n" + prettyJSON(item.Error)
 		} else {
@@ -748,6 +826,7 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 		message.Text = toolName
 		message.Input = prettyJSON(item.Arguments)
 		message.Output = prettyJSON(item.ContentItems)
+		applyToolActivitySummary(&message, item.Tool, item.Arguments)
 	case "collabAgentToolCall":
 		message.Kind = "tool"
 		message.ToolType = "collab"
@@ -785,7 +864,13 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 		message.Title = "压缩上下文"
 		message.Text = "Codex 已整理会话上下文"
 	default:
-		return
+		if strings.TrimSpace(item.Type) == "" {
+			return
+		}
+		message.Kind = "tool"
+		message.ToolType = "generic"
+		message.Title = "未识别活动 · " + item.Type
+		message.Text = item.Type
 	}
 	if message.Kind == "reasoning" || message.Kind == "plan" {
 		var textTruncated bool
@@ -799,6 +884,130 @@ func upsertRemoteItem(session *Session, item remoteItem, timestamp int64, lifecy
 	message.Output, outputTruncated = limitActivityDetail(message.Output)
 	message.Truncated = message.Truncated || outputTruncated
 	upsertMessage(session, message)
+}
+
+func formatCommandActions(actions []remoteCommandAction, command string) (string, string) {
+	title := "终端命令"
+	if len(actions) == 0 {
+		return title, command
+	}
+	lines := make([]string, 0, len(actions))
+	types := make(map[string]bool)
+	for _, action := range actions {
+		types[action.Type] = true
+		var line string
+		switch action.Type {
+		case "read":
+			line = strings.TrimSpace(action.Path)
+			if line == "" {
+				line = strings.TrimSpace(action.Name)
+			}
+		case "listFiles":
+			line = strings.TrimSpace(action.Path)
+		case "search":
+			parts := make([]string, 0, 2)
+			if strings.TrimSpace(action.Query) != "" {
+				parts = append(parts, "“"+strings.TrimSpace(action.Query)+"”")
+			}
+			if strings.TrimSpace(action.Path) != "" {
+				parts = append(parts, strings.TrimSpace(action.Path))
+			}
+			line = strings.Join(parts, " · ")
+		}
+		if line != "" && !containsString(lines, line) {
+			lines = append(lines, line)
+		}
+	}
+	if len(types) == 1 {
+		switch {
+		case types["read"]:
+			title = "读取文件"
+		case types["listFiles"]:
+			title = "列出目录"
+		case types["search"]:
+			title = "搜索文件"
+		}
+	} else if types["read"] || types["listFiles"] || types["search"] {
+		title = "读取工作区"
+	}
+	if len(lines) == 0 {
+		return title, command
+	}
+	return title, strings.Join(lines, "\n")
+}
+
+func formatCommandInput(command string, cwd string) string {
+	parts := make([]string, 0, 2)
+	if strings.TrimSpace(cwd) != "" {
+		parts = append(parts, "工作目录: "+strings.TrimSpace(cwd))
+	}
+	if strings.TrimSpace(command) != "" {
+		parts = append(parts, "命令: "+strings.TrimSpace(command))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func applyToolActivitySummary(message *Message, toolName string, arguments json.RawMessage) {
+	normalized := strings.ToLower(strings.NewReplacer("-", "", "_", "", "/", "", ".", "").Replace(toolName))
+	words := strings.Fields(strings.ToLower(strings.NewReplacer("-", " ", "_", " ", "/", " ", ".", " ", ":", " ").Replace(toolName)))
+	hasWord := func(values ...string) bool {
+		for _, value := range values {
+			if containsString(words, value) {
+				return true
+			}
+		}
+		return false
+	}
+	var title string
+	switch {
+	case strings.Contains(normalized, "readfile"), strings.Contains(normalized, "getfile"),
+		strings.HasPrefix(normalized, "read") && (strings.HasSuffix(normalized, "file") || strings.HasSuffix(normalized, "files")),
+		hasWord("read", "get") && hasWord("file", "files"):
+		title = "读取文件"
+	case strings.Contains(normalized, "listfiles"), strings.Contains(normalized, "listdirectory"),
+		hasWord("list") && hasWord("file", "files", "directory", "directories", "dir"):
+		title = "列出目录"
+	case strings.Contains(normalized, "searchfiles"), strings.Contains(normalized, "findfiles"),
+		hasWord("search", "find") && hasWord("file", "files"):
+		title = "搜索文件"
+	default:
+		return
+	}
+	message.Title = title + " · " + toolName
+	if summary := toolArgumentSummary(arguments); summary != "" {
+		message.Text = summary
+	}
+}
+
+func toolArgumentSummary(raw json.RawMessage) string {
+	if rawJSONEmpty(raw) {
+		return ""
+	}
+	var values map[string]any
+	if json.Unmarshal(raw, &values) != nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	for _, key := range []string{"path", "filePath", "filepath", "directory", "dir", "query", "pattern"} {
+		value, ok := values[key].(string)
+		value = strings.TrimSpace(value)
+		if ok && value != "" && !containsString(parts, value) {
+			parts = append(parts, value)
+		}
+		if len(parts) == 2 {
+			break
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func upsertMessage(session *Session, message Message) {

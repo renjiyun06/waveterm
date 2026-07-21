@@ -9,6 +9,13 @@ import { fireAndForget, isBlank, makeConnRoute } from "@/util/util";
 import { formatRemoteUri } from "@/util/waveutil";
 import * as jotai from "jotai";
 import { FileWorkspaceView } from "./fileworkspace";
+import {
+    getGitStatusForPath,
+    getGitStatusKey,
+    getGitStatusKeyPrefix,
+    getRootGitStatuses,
+    normalizeGitPath,
+} from "./fileworkspace-git";
 import type { FileWorkspaceEnv } from "./fileworkspaceenv";
 
 const GitRefreshIntervalMs = 3000;
@@ -95,6 +102,9 @@ export class FileWorkspaceViewModel implements ViewModel {
     diffEpoch = 0;
     activeConnection: string;
     workspaceStates: FileWorkspaceState[] = [];
+    gitProbePaths = new Set<string>();
+    gitProbePromises = new Map<string, Promise<GitStatusResponse | null>>();
+    removedRootIds = new Set<string>();
 
     constructor(initOpts: ViewModelInitType) {
         this.blockId = initOpts.blockId;
@@ -437,7 +447,7 @@ export class FileWorkspaceViewModel implements ViewModel {
             globalStore.set(this.addRootOpenAtom, false);
             globalStore.set(this.addRootPathAtom, "~");
             this.setDirectoryExpanded(root.id, root.path, true);
-            await Promise.all([this.loadDirectory(root, root.path), this.refreshGitStatus(root)]);
+            await Promise.all([this.loadDirectory(root, root.path), this.refreshGitStatus(root, root.path)]);
         } catch (error) {
             globalStore.set(this.addRootErrorAtom, error instanceof Error ? error.message : String(error));
         } finally {
@@ -461,6 +471,7 @@ export class FileWorkspaceViewModel implements ViewModel {
         const remainingTabs = this.getTabs().filter((tab) => tab.rootId != rootId);
         globalStore.set(this.tabsAtom, remainingTabs);
         await this.persistRoots(roots.filter((root) => root.id != rootId));
+        this.removedRootIds.add(rootId);
 
         const rootPrefix = `${rootId}:`;
         const expanded = globalStore.get(this.expandedDirectoriesAtom).filter((key) => !key.startsWith(rootPrefix));
@@ -479,8 +490,19 @@ export class FileWorkspaceViewModel implements ViewModel {
 
         const statuses = { ...globalStore.get(this.gitStatusesAtom) };
         const errors = { ...globalStore.get(this.gitErrorsAtom) };
-        delete statuses[rootId];
-        delete errors[rootId];
+        const gitPrefix = getGitStatusKeyPrefix(rootId);
+        for (const key of Object.keys(statuses)) {
+            if (key.startsWith(gitPrefix)) delete statuses[key];
+        }
+        for (const key of Object.keys(errors)) {
+            if (key.startsWith(rootPrefix)) delete errors[key];
+        }
+        for (const key of this.gitProbePaths) {
+            if (key.startsWith(rootPrefix)) this.gitProbePaths.delete(key);
+        }
+        for (const key of this.gitProbePromises.keys()) {
+            if (key.startsWith(rootPrefix)) this.gitProbePromises.delete(key);
+        }
         globalStore.set(this.gitStatusesAtom, statuses);
         globalStore.set(this.gitErrorsAtom, errors);
     }
@@ -507,7 +529,7 @@ export class FileWorkspaceViewModel implements ViewModel {
             return;
         }
         this.setDirectoryExpanded(root.id, path, true);
-        await this.loadDirectory(root, path);
+        await Promise.all([this.loadDirectory(root, path), this.probeGitStatus(root, path)]);
     }
 
     async loadDirectory(root: FileWorkspaceRoot, path: string, force = false) {
@@ -574,27 +596,48 @@ export class FileWorkspaceViewModel implements ViewModel {
         await this.showTab(tab);
     }
 
-    async refreshGitStatus(root: FileWorkspaceRoot): Promise<GitStatusResponse | null> {
+    async probeGitStatus(root: FileWorkspaceRoot, path: string, force = false): Promise<GitStatusResponse | null> {
+        const probeKey = getDirectoryKey(root.id, normalizeGitPath(path));
+        if (!force && this.gitProbePaths.has(probeKey)) {
+            return getGitStatusForPath(globalStore.get(this.gitStatusesAtom), root.id, path) ?? null;
+        }
+        const pending = this.gitProbePromises.get(probeKey);
+        if (pending) return pending;
+        const promise = this.refreshGitStatus(root, path).finally(() => this.gitProbePromises.delete(probeKey));
+        this.gitProbePromises.set(probeKey, promise);
+        return promise;
+    }
+
+    async refreshGitStatus(root: FileWorkspaceRoot, path = root.path): Promise<GitStatusResponse | null> {
+        const probeKey = getDirectoryKey(root.id, normalizeGitPath(path));
         try {
             const response = await this.env.rpc.RemoteGitStatusCommand(
                 TabRpcClient,
-                { path: root.path },
+                { path },
                 { route: makeConnRoute(root.connection), timeout: 10000 }
             );
-            if (this.disposed) {
+            if (this.disposed || this.removedRootIds.has(root.id)) {
                 return response;
             }
-            const statuses = { ...globalStore.get(this.gitStatusesAtom), [root.id]: response };
+            this.gitProbePaths.add(probeKey);
+            const statuses = { ...globalStore.get(this.gitStatusesAtom) };
+            const probedRepositoryKey = getGitStatusKey(root.id, path);
+            if (!response?.isrepo || normalizeGitPath(response.root) !== normalizeGitPath(path)) {
+                delete statuses[probedRepositoryKey];
+            }
+            if (response?.isrepo && response.root) {
+                statuses[getGitStatusKey(root.id, response.root)] = response;
+            }
             const errors = { ...globalStore.get(this.gitErrorsAtom) };
-            delete errors[root.id];
+            delete errors[probeKey];
             globalStore.set(this.gitStatusesAtom, statuses);
             globalStore.set(this.gitErrorsAtom, errors);
             return response;
         } catch (error) {
-            if (!this.disposed) {
+            if (!this.disposed && !this.removedRootIds.has(root.id)) {
                 globalStore.set(this.gitErrorsAtom, {
                     ...globalStore.get(this.gitErrorsAtom),
-                    [root.id]: error instanceof Error ? error.message : String(error),
+                    [probeKey]: error instanceof Error ? error.message : String(error),
                 });
             }
             return null;
@@ -607,7 +650,19 @@ export class FileWorkspaceViewModel implements ViewModel {
         }
         this.gitRefreshPending = true;
         try {
-            await Promise.all(this.getActiveRoots().map((root) => this.refreshGitStatus(root)));
+            const statuses = globalStore.get(this.gitStatusesAtom);
+            const refreshes: Promise<GitStatusResponse | null>[] = [];
+            for (const root of this.getActiveRoots()) {
+                const repositories = getRootGitStatuses(statuses, root.id);
+                if (repositories.length === 0) {
+                    refreshes.push(this.refreshGitStatus(root, root.path));
+                    continue;
+                }
+                for (const repository of repositories) {
+                    refreshes.push(this.refreshGitStatus(root, repository.root));
+                }
+            }
+            await Promise.all(refreshes);
             if (globalStore.get(this.previewModel.newFileContent) == null) {
                 await this.refreshSelectedFileDiff();
             }
@@ -653,16 +708,24 @@ export class FileWorkspaceViewModel implements ViewModel {
         const roots = this.getActiveRoots();
         const expandedDirectories = globalStore.get(this.expandedDirectoriesAtom);
         const directoryLoads: Promise<void>[] = [];
+        const probes: Array<{ root: FileWorkspaceRoot; path: string }> = [];
         for (const root of roots) {
             const prefix = `${root.id}:`;
             for (const key of expandedDirectories) {
                 if (!key.startsWith(prefix)) {
                     continue;
                 }
-                directoryLoads.push(this.loadDirectory(root, key.slice(prefix.length)));
+                const path = key.slice(prefix.length);
+                directoryLoads.push(this.loadDirectory(root, path));
+                probes.push({ root, path });
             }
         }
-        await Promise.all([...directoryLoads, this.refreshGitStatuses()]);
+        await Promise.all(directoryLoads);
+        probes.sort((left, right) => normalizeGitPath(left.path).length - normalizeGitPath(right.path).length);
+        for (const probe of probes) {
+            await this.probeGitStatus(probe.root, probe.path, true);
+        }
+        await this.refreshGitStatuses();
     }
 
     async saveFile() {

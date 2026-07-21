@@ -112,6 +112,7 @@ func TestMakeCodexActionRequestPreservesText(t *testing.T) {
 		Method string `json:"method"`
 		Params struct {
 			ExpectedTurnId string `json:"expectedTurnId"`
+			Summary        string `json:"summary"`
 			Input          []struct {
 				Text string `json:"text"`
 			} `json:"input"`
@@ -123,6 +124,78 @@ func TestMakeCodexActionRequestPreservesText(t *testing.T) {
 	if decoded.Method != "turn/steer" || decoded.Params.ExpectedTurnId != "turn-1" ||
 		len(decoded.Params.Input) != 1 || decoded.Params.Input[0].Text != "好的 \"quoted\"\nsecond line" {
 		t.Fatalf("unexpected request: %s", request)
+	}
+}
+
+func TestWebTurnStartRequestsConciseReasoningSummary(t *testing.T) {
+	request, err := makeCodexActionRequest(wshrpc.CodexSessionAction{
+		ActionId: "action-1",
+		Kind:     "turn/start",
+		ThreadId: "thread-1",
+		Text:     "inspect",
+	})
+	if err != nil {
+		t.Fatalf("make request: %v", err)
+	}
+	var decoded struct {
+		Params struct {
+			Summary string `json:"summary"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(request, &decoded); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if decoded.Params.Summary != "concise" {
+		t.Fatalf("summary = %q, want concise", decoded.Params.Summary)
+	}
+}
+
+func TestPrepareCodexTurnRequestRequestsReadableSummary(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     string
+		wantSummary string
+	}{
+		{name: "missing", request: `{"id":1,"method":"turn/start","params":{"threadId":"thread-1"}}`, wantSummary: "concise"},
+		{name: "auto", request: `{"id":1,"method":"turn/start","params":{"threadId":"thread-1","summary":"auto"}}`, wantSummary: "concise"},
+		{name: "explicit detailed", request: `{"id":1,"method":"turn/start","params":{"threadId":"thread-1","summary":"detailed"}}`, wantSummary: "detailed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			prepared := prepareCodexTurnRequest([]byte(test.request))
+			var decoded struct {
+				Params struct {
+					Summary string `json:"summary"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal(prepared, &decoded); err != nil {
+				t.Fatalf("decode prepared request: %v", err)
+			}
+			if decoded.Params.Summary != test.wantSummary {
+				t.Fatalf("summary = %q, want %q", decoded.Params.Summary, test.wantSummary)
+			}
+		})
+	}
+	nonTurn := []byte(`{"id":1,"method":"thread/resume","params":{"threadId":"thread-1"}}`)
+	if prepared := prepareCodexTurnRequest(nonTurn); string(prepared) != string(nonTurn) {
+		t.Fatalf("non-turn request was changed: %s", prepared)
+	}
+}
+
+func TestProxyReportsExplicitTuiTurnSettings(t *testing.T) {
+	bridge := &codexBridge{reports: make(chan bridgeReport, 2), done: make(chan struct{})}
+	proxy := &codexProxy{bridge: bridge}
+	proxy.reportTuiTurnSettings([]byte(`{"method":"turn/start","params":{"threadId":"thread-1","model":"gpt-5.7","effort":"high"}}`))
+	report := <-bridge.reports
+	if report.kind != "notification" || !strings.Contains(report.data, `"thread/settings/updated"`) ||
+		!strings.Contains(report.data, `"gpt-5.7"`) || !strings.Contains(report.data, `"high"`) {
+		t.Fatalf("unexpected settings report: %#v", report)
+	}
+	proxy.reportTuiTurnSettings([]byte(`{"method":"turn/start","params":{"threadId":"thread-1"}}`))
+	select {
+	case report := <-bridge.reports:
+		t.Fatalf("turn without explicit settings produced report: %#v", report)
+	default:
 	}
 }
 
@@ -198,6 +271,8 @@ func TestShouldReportCodexActivityNotifications(t *testing.T) {
 		"item/commandExecution/outputDelta",
 		"item/fileChange/patchUpdated",
 		"item/mcpToolCall/progress",
+		"thread/settings/updated",
+		"thread/tokenUsage/updated",
 	}
 	for _, method := range reported {
 		if !shouldReportCodexNotification(method) {
@@ -206,6 +281,30 @@ func TestShouldReportCodexActivityNotifications(t *testing.T) {
 	}
 	if shouldReportCodexNotification("item/reasoning/textDelta") {
 		t.Fatal("raw reasoning notification must not be reported")
+	}
+}
+
+func TestProxyCapturesSuccessfulRollbackSnapshot(t *testing.T) {
+	bridge := &codexBridge{reports: make(chan bridgeReport, 2), done: make(chan struct{})}
+	proxy := &codexProxy{
+		bridge:        bridge,
+		tuiRequests:   map[string]string{"7": "thread/rollback", "8": "thread/rollback"},
+		webRequestIds: make(map[string]struct{}),
+	}
+	if consumed := proxy.observeServerMessage([]byte(`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"thread-1","turns":[]}}}`)); consumed {
+		t.Fatal("TUI rollback response must be forwarded")
+	}
+	report := <-bridge.reports
+	if report.kind != "history-snapshot" || !strings.Contains(report.data, `"thread-1"`) {
+		t.Fatalf("unexpected rollback report: %#v", report)
+	}
+	if consumed := proxy.observeServerMessage([]byte(`{"jsonrpc":"2.0","id":8,"error":{"message":"rollback failed"}}`)); consumed {
+		t.Fatal("failed TUI rollback response must be forwarded")
+	}
+	select {
+	case report := <-bridge.reports:
+		t.Fatalf("failed rollback produced report: %#v", report)
+	default:
 	}
 }
 

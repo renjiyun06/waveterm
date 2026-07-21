@@ -675,7 +675,9 @@ func (proxy *codexProxy) clientToServer(client *websocket.Conn) {
 		if err != nil {
 			return
 		}
+		message = prepareCodexTurnRequest(message)
 		proxy.trackTuiRequest(message)
+		proxy.reportTuiTurnSettings(message)
 		proxy.upstreamLock.Lock()
 		err = proxy.upstream.WriteMessage(messageType, message)
 		proxy.upstreamLock.Unlock()
@@ -723,13 +725,17 @@ func (proxy *codexProxy) observeServerMessage(message []byte) bool {
 			}
 			return true
 		}
-		if (tuiMethod == "thread/start" || tuiMethod == "thread/resume" || tuiMethod == "thread/fork") &&
-			len(envelope.Result) != 0 && string(envelope.Result) != "null" {
-			proxy.bridge.queue("snapshot", string(envelope.Result))
-			// Picker connections only list/read threads and are intentionally
-			// short-lived. Start Web action polling after the persistent thread
-			// connection is known so a closing picker cannot consume an action.
-			proxy.startPolling()
+		if len(envelope.Result) != 0 && string(envelope.Result) != "null" {
+			switch tuiMethod {
+			case "thread/start", "thread/resume", "thread/fork":
+				proxy.bridge.queue("snapshot", string(envelope.Result))
+				// Picker connections only list/read threads and are intentionally
+				// short-lived. Start Web action polling after the persistent thread
+				// connection is known so a closing picker cannot consume an action.
+				proxy.startPolling()
+			case "thread/rollback":
+				proxy.bridge.queue("history-snapshot", string(envelope.Result))
+			}
 		}
 		return false
 	}
@@ -737,6 +743,71 @@ func (proxy *codexProxy) observeServerMessage(message []byte) bool {
 		proxy.bridge.queue("notification", string(message))
 	}
 	return false
+}
+
+func prepareCodexTurnRequest(message []byte) []byte {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(message, &envelope) != nil {
+		return message
+	}
+	var method string
+	if json.Unmarshal(envelope["method"], &method) != nil || method != "turn/start" {
+		return message
+	}
+	params := make(map[string]json.RawMessage)
+	if len(envelope["params"]) != 0 && json.Unmarshal(envelope["params"], &params) != nil {
+		return message
+	}
+	var summary string
+	summaryRaw, hasSummary := params["summary"]
+	if hasSummary && string(summaryRaw) != "null" && json.Unmarshal(summaryRaw, &summary) == nil && summary != "auto" {
+		return message
+	}
+	params["summary"] = json.RawMessage(`"concise"`)
+	paramsRaw, err := json.Marshal(params)
+	if err != nil {
+		return message
+	}
+	envelope["params"] = paramsRaw
+	prepared, err := json.Marshal(envelope)
+	if err != nil {
+		return message
+	}
+	return prepared
+}
+
+func (proxy *codexProxy) reportTuiTurnSettings(message []byte) {
+	var envelope struct {
+		Method string `json:"method"`
+		Params struct {
+			ThreadId string  `json:"threadId"`
+			Model    *string `json:"model"`
+			Effort   *string `json:"effort"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(message, &envelope) != nil || envelope.Method != "turn/start" || envelope.Params.ThreadId == "" {
+		return
+	}
+	settings := make(map[string]any)
+	if envelope.Params.Model != nil {
+		settings["model"] = *envelope.Params.Model
+	}
+	if envelope.Params.Effort != nil {
+		settings["effort"] = *envelope.Params.Effort
+	}
+	if len(settings) == 0 {
+		return
+	}
+	notification, err := json.Marshal(map[string]any{
+		"method": "thread/settings/updated",
+		"params": map[string]any{
+			"threadId":       envelope.Params.ThreadId,
+			"threadSettings": settings,
+		},
+	})
+	if err == nil {
+		proxy.bridge.queue("notification", string(notification))
+	}
 }
 
 func (proxy *codexProxy) trackTuiRequest(message []byte) {
@@ -795,6 +866,7 @@ func makeCodexActionRequest(action wshrpc.CodexSessionAction) ([]byte, error) {
 	case "turn/start":
 		params["input"] = []map[string]any{{"type": "text", "text": action.Text}}
 		params["clientUserMessageId"] = action.ActionId
+		params["summary"] = "concise"
 	case "turn/steer":
 		if action.TurnId == "" {
 			return nil, errors.New("Codex steer action has no active turn")
@@ -824,6 +896,8 @@ func shouldReportCodexNotification(method string) bool {
 		"thread/started",
 		"thread/status/changed",
 		"thread/name/updated",
+		"thread/settings/updated",
+		"thread/tokenUsage/updated",
 		"thread/closed",
 		"turn/started",
 		"turn/completed",

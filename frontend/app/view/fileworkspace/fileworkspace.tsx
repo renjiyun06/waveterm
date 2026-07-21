@@ -6,24 +6,16 @@ import { fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
+    getGitFileStatus,
+    getGitStatusForPath,
+    hasGitChangesForDirectory,
+    isGitRepositoryRoot,
+    normalizeGitPath,
+} from "./fileworkspace-git";
 import type { FileWorkspaceTab, FileWorkspaceViewModel } from "./fileworkspace-model";
 import { getDirectoryKey } from "./fileworkspace-model";
 import "./fileworkspace.scss";
-
-function normalizePath(path: string): string {
-    return path?.replace(/\\/g, "/") ?? "";
-}
-
-function getGitFileStatus(gitStatus: GitStatusResponse, path: string): string {
-    const normalizedPath = normalizePath(path);
-    return gitStatus?.files?.find((file) => file.abspath == normalizedPath)?.status ?? "";
-}
-
-function hasGitChangesBelow(gitStatus: GitStatusResponse, path: string): boolean {
-    const normalizedPath = normalizePath(path).replace(/\/+$/, "");
-    const prefix = normalizedPath + "/";
-    return gitStatus?.files?.some((file) => file.abspath == normalizedPath || file.abspath.startsWith(prefix)) ?? false;
-}
 
 function getStatusClass(status: string): string {
     if (status == "A") {
@@ -59,7 +51,6 @@ const DirectoryBranch = memo(({ model, root, path, depth }: DirectoryBranchProps
     const gitStatuses = useAtomValue(model.gitStatusesAtom);
     const selectedPath = useAtomValue(model.selectedPathAtom);
     const state = directoryStates[getDirectoryKey(root.id, path)];
-    const gitStatus = gitStatuses[root.id];
 
     if (state?.loading && !state.entries.length) {
         return (
@@ -81,8 +72,10 @@ const DirectoryBranch = memo(({ model, root, path, depth }: DirectoryBranchProps
                 const entryPath = entry.path;
                 const entryKey = getDirectoryKey(root.id, entryPath);
                 const expanded = expandedDirectories.includes(entryKey);
+                const gitStatus = getGitStatusForPath(gitStatuses, root.id, entryPath);
+                const repositoryRoot = entry.isdir && isGitRepositoryRoot(gitStatus, entryPath);
                 const fileStatus = entry.isdir ? "" : getGitFileStatus(gitStatus, entryPath);
-                const directoryDirty = entry.isdir && hasGitChangesBelow(gitStatus, entryPath);
+                const directoryDirty = entry.isdir && hasGitChangesForDirectory(gitStatuses, root.id, entryPath);
                 const selected = selectedPath == entryPath;
                 return (
                     <div key={entryPath}>
@@ -112,6 +105,15 @@ const DirectoryBranch = memo(({ model, root, path, depth }: DirectoryBranchProps
                                 } ${directoryDirty ? "text-amber-400" : "text-secondary"}`}
                             />
                             <span className="min-w-0 truncate">{entry.name || entry.path}</span>
+                            {repositoryRoot && (
+                                <span
+                                    className="ml-2 max-w-24 truncate text-[10px] text-secondary"
+                                    title={gitStatus?.branch || "HEAD"}
+                                >
+                                    <i className="fa-sharp fa-solid fa-code-branch mr-1" />
+                                    {gitStatus?.branch || "HEAD"}
+                                </span>
+                            )}
                             {directoryDirty && (
                                 <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
                             )}
@@ -135,8 +137,9 @@ const WorkspaceRoot = memo(({ model, root }: { model: FileWorkspaceViewModel; ro
     const selectedRootId = useAtomValue(model.selectedRootIdAtom);
     const rootKey = getDirectoryKey(root.id, root.path);
     const expanded = expandedDirectories.includes(rootKey);
-    const gitStatus = gitStatuses[root.id];
-    const gitError = gitErrors[root.id];
+    const gitStatus = getGitStatusForPath(gitStatuses, root.id, root.path);
+    const rootDirty = hasGitChangesForDirectory(gitStatuses, root.id, root.path);
+    const gitError = gitErrors[getDirectoryKey(root.id, normalizeGitPath(root.path))];
     const selected = selectedRootId == root.id;
 
     return (
@@ -150,10 +153,7 @@ const WorkspaceRoot = memo(({ model, root }: { model: FileWorkspaceViewModel; ro
                     type="button"
                     className="flex min-w-0 flex-1 items-center text-left cursor-pointer"
                     onClick={() => {
-                        model.setDirectoryExpanded(root.id, root.path, !expanded);
-                        if (!expanded) {
-                            fireAndForget(() => model.loadDirectory(root, root.path));
-                        }
+                        fireAndForget(() => model.toggleDirectory(root, root.path));
                     }}
                     title={`${root.connection}:${root.path}`}
                 >
@@ -162,7 +162,7 @@ const WorkspaceRoot = memo(({ model, root }: { model: FileWorkspaceViewModel; ro
                     </span>
                     <i className="fa-sharp fa-solid fa-folder-tree mr-1.5 text-accent" />
                     <span className="min-w-0 truncate font-medium text-primary">{root.name || root.path}</span>
-                    {gitStatus?.dirty && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
+                    {rootDirty && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
                 </button>
                 {gitStatus?.isrepo && (
                     <span className="ml-2 max-w-24 truncate text-[10px] text-secondary" title={gitStatus.branch}>

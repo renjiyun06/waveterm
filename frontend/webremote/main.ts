@@ -1,6 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { renderMarkdownInto } from "./markdown";
 import "./style.css";
 
 type PlanStep = {
@@ -29,6 +30,10 @@ type CodexSession = {
     workspaceId?: string;
     connection?: string;
     threadId?: string;
+    model?: string;
+    reasoningEffort?: string;
+    contextTokens?: number;
+    contextWindow?: number;
     title: string;
     cwd?: string;
     state: string;
@@ -59,6 +64,7 @@ const sessionSearch = getElement<HTMLInputElement>("session-search");
 const sessionCount = getElement<HTMLSpanElement>("session-count");
 const conversationTitle = getElement<HTMLDivElement>("conversation-title");
 const conversationMeta = getElement<HTMLDivElement>("conversation-meta");
+const conversationStats = getElement<HTMLDivElement>("conversation-stats");
 const connectionState = getElement<HTMLDivElement>("connection-state");
 const connectionLabel = getElement<HTMLSpanElement>("connection-label");
 const emptyState = getElement<HTMLDivElement>("empty-state");
@@ -80,6 +86,8 @@ let composing = false;
 let checkingAuth = false;
 let renderedBlockId = "";
 let renderedSessionListKey = "";
+let remoteRenderFrame: number | null = null;
+const messageSourceCache = new WeakMap<HTMLElement, string>();
 
 const api = async (path: string, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
@@ -126,10 +134,60 @@ const stateClass = (state: string): string => {
 
 const compactPath = (path?: string): string => {
     if (!path) return "";
-    const normalized = path.replaceAll("\\", "/");
+    const normalized = path.replace(/\\/g, "/");
     const parts = normalized.split("/").filter(Boolean);
     if (parts.length <= 2) return path;
     return `…/${parts.slice(-2).join("/")}`;
+};
+
+const formatTokenCount = (value: number): string => {
+    if (!Number.isFinite(value)) return "未知";
+    if (value < 1000) return Math.max(0, Math.round(value)).toLocaleString("zh-CN");
+    return new Intl.NumberFormat("en-US", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+    }).format(Math.max(0, value));
+};
+
+const renderConversationStats = (session?: CodexSession) => {
+    if (!session) {
+        conversationStats.hidden = true;
+        conversationStats.replaceChildren();
+        delete conversationStats.dataset.renderKey;
+        return;
+    }
+    const contextTokens = Number.isFinite(session.contextTokens) ? Math.max(0, session.contextTokens!) : undefined;
+    const contextWindow = Number.isFinite(session.contextWindow) ? Math.max(0, session.contextWindow!) : undefined;
+    const percentage =
+        contextTokens != null && contextWindow != null && contextWindow > 0
+            ? Math.min(100, Math.max(0, (contextTokens / contextWindow) * 100))
+            : undefined;
+    const values = [
+        session.model ? { label: session.model, title: `模型：${session.model}` } : null,
+        session.reasoningEffort
+            ? { label: `推理 ${session.reasoningEffort}`, title: `推理强度：${session.reasoningEffort}` }
+            : null,
+        contextTokens != null && contextWindow != null && contextWindow > 0
+            ? {
+                  label: `上下文 ${formatTokenCount(contextTokens)} / ${formatTokenCount(contextWindow)}（${
+                      percentage! < 10 ? percentage!.toFixed(1) : Math.round(percentage!)
+                  }%）`,
+                  title: `活动上下文：${contextTokens.toLocaleString("zh-CN")} / ${contextWindow.toLocaleString("zh-CN")} tokens`,
+              }
+            : { label: "上下文未知", title: "尚未收到该会话的上下文用量" },
+    ].filter((value): value is { label: string; title: string } => value != null);
+    const renderKey = JSON.stringify(values);
+    if (conversationStats.dataset.renderKey === renderKey) return;
+    conversationStats.dataset.renderKey = renderKey;
+    conversationStats.replaceChildren();
+    for (const value of values) {
+        const chip = document.createElement("span");
+        chip.className = "conversation-stat";
+        chip.textContent = value.label;
+        chip.title = value.title;
+        conversationStats.append(chip);
+    }
+    conversationStats.hidden = values.length === 0;
 };
 
 const closeSidebar = () => {
@@ -290,7 +348,22 @@ const renderConversationMessage = (article: HTMLElement, message: ChatMessage) =
     label.textContent = message.role === "user" ? "你" : "Codex";
     const bubble = article.querySelector<HTMLElement>(".message-bubble")!;
     const text = message.text || (message.status === "streaming" ? "…" : "");
-    if (bubble.textContent !== text) bubble.textContent = text;
+    const renderKey = `${message.role}\u0000${text}`;
+    if (messageSourceCache.get(bubble) === renderKey) return;
+    messageSourceCache.set(bubble, renderKey);
+    if (message.role === "user") {
+        bubble.classList.remove("markdown-body");
+        bubble.textContent = text;
+        return;
+    }
+    bubble.classList.add("markdown-body");
+    try {
+        renderMarkdownInto(bubble, text);
+    } catch (error) {
+        console.error("Unable to render Codex Markdown response", error);
+        bubble.classList.remove("markdown-body");
+        bubble.textContent = text;
+    }
 };
 
 const renderReasoningItem = (article: HTMLElement, message: ChatMessage) => {
@@ -621,6 +694,7 @@ const render = () => {
         conversationTitle.textContent = "等待 Codex 会话";
         conversationMeta.textContent = "请先在 Wave 终端中运行 codex";
     }
+    renderConversationStats(selected);
     renderMessages(selected);
     updateComposer(selected);
 };
@@ -633,7 +707,11 @@ const applySessions = (nextSessions?: RawCodexSession[] | null) => {
             plan: Array.isArray(message.plan) ? message.plan : [],
         })),
     }));
-    render();
+    if (remoteRenderFrame != null) return;
+    remoteRenderFrame = requestAnimationFrame(() => {
+        remoteRenderFrame = null;
+        render();
+    });
 };
 
 const connectEvents = () => {

@@ -76,6 +76,35 @@ func TestSnapshotAndNotificationsBuildChat(t *testing.T) {
 	}
 }
 
+func TestSessionMetadataTracksSnapshotUsageAndSettings(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	apply := func(kind string, data string) {
+		t.Helper()
+		if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{
+			BridgeId: "bridge-1",
+			BlockId:  "block-12345678",
+			Kind:     kind,
+			Data:     data,
+		}); err != nil {
+			t.Fatalf("apply %s: %v", kind, err)
+		}
+	}
+	apply("snapshot", `{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[]},"model":"gpt-5.6-sol","reasoningEffort":"high"}`)
+	apply("notification", `{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":45171},"last":{"totalTokens":16697},"modelContextWindow":258400}}}`)
+	apply("notification", `{"method":"thread/settings/updated","params":{"threadId":"thread-1","threadSettings":{"model":"gpt-5.7","effort":"max"}}}`)
+	apply("notification", `{"method":"thread/tokenUsage/updated","params":{"threadId":"other-thread","tokenUsage":{"last":{"totalTokens":999999},"modelContextWindow":1}}}`)
+	apply("notification", `{"method":"thread/settings/updated","params":{"threadSettings":{"model":"wrong-without-thread","effort":"low"}}}`)
+	session, ok := registry.Get("block-12345678")
+	if !ok {
+		t.Fatal("session missing")
+	}
+	if session.Model != "gpt-5.7" || session.ReasoningEffort != "max" ||
+		session.ContextTokens != 16697 || session.ContextWindow != 258400 {
+		t.Fatalf("unexpected session metadata: %#v", session)
+	}
+}
+
 func TestSubmitSelectsStartOrSteer(t *testing.T) {
 	registry := NewRegistry()
 	registerTestSession(t, registry)
@@ -245,6 +274,75 @@ func TestSnapshotIncludesReasoningAndToolActivity(t *testing.T) {
 	}
 	if session.Messages[4].ToolType != "web" || session.Messages[5].Kind != "message" {
 		t.Fatalf("unexpected final timeline items: %#v", session.Messages[4:])
+	}
+}
+
+func TestCommandActionsAndUnknownItemsRemainVisible(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	snapshot := `{
+		"thread": {"id":"thread-actions","status":{"type":"idle"},"turns":[{
+			"id":"turn-actions","status":"completed","items":[
+				{"id":"read-1","type":"commandExecution","command":"sed -n 1,80p main.go","cwd":"/work","status":"completed","commandActions":[{"type":"read","command":"sed -n 1,80p main.go","name":"main.go","path":"/work/main.go"}]},
+				{"id":"list-1","type":"commandExecution","command":"find src","status":"completed","commandActions":[{"type":"listFiles","command":"find src","path":"/work/src"}]},
+				{"id":"search-1","type":"commandExecution","command":"rg TODO","status":"completed","commandActions":[{"type":"search","command":"rg TODO","query":"TODO","path":"/work"}]},
+				{"id":"mcp-read","type":"mcpToolCall","server":"fs","tool":"read_file","status":"completed","arguments":{"path":"/work/README.md"},"result":{"ok":true}},
+				{"id":"dynamic-read","type":"dynamicToolCall","namespace":"filesystem","tool":"read_text_file","status":"completed","arguments":{"filePath":"/work/notes.txt"},"contentItems":[]},
+				{"id":"future-1","type":"futureActivity","status":"completed","content":{"secret":"must not be copied"}}
+			]
+		}]}
+	}`
+	if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{BridgeId: "bridge-1", BlockId: "block-12345678", Kind: "snapshot", Data: snapshot}); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	session, _ := registry.Get("block-12345678")
+	if len(session.Messages) != 6 {
+		t.Fatalf("timeline length = %d, want 6: %#v", len(session.Messages), session.Messages)
+	}
+	if session.Messages[0].Title != "读取文件" || session.Messages[0].Text != "/work/main.go" ||
+		!strings.Contains(session.Messages[0].Input, "sed -n") {
+		t.Fatalf("unexpected read summary: %#v", session.Messages[0])
+	}
+	if session.Messages[1].Title != "列出目录" || session.Messages[2].Title != "搜索文件" {
+		t.Fatalf("unexpected command action titles: %#v", session.Messages[1:3])
+	}
+	if !strings.HasPrefix(session.Messages[3].Title, "读取文件") || session.Messages[3].Text != "/work/README.md" {
+		t.Fatalf("unexpected MCP read summary: %#v", session.Messages[3])
+	}
+	if !strings.HasPrefix(session.Messages[4].Title, "读取文件") || session.Messages[4].Text != "/work/notes.txt" {
+		t.Fatalf("unexpected dynamic read summary: %#v", session.Messages[4])
+	}
+	if session.Messages[5].Title != "未识别活动 · futureActivity" ||
+		strings.Contains(session.Messages[5].Text, "secret") || session.Messages[5].Input != "" || session.Messages[5].Output != "" {
+		t.Fatalf("unknown item leaked content or disappeared: %#v", session.Messages[5])
+	}
+}
+
+func TestEmptyReasoningAndRollbackSnapshot(t *testing.T) {
+	registry := NewRegistry()
+	registerTestSession(t, registry)
+	initial := `{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[{"id":"turn-1","status":"completed","items":[{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"keep"}]},{"id":"reason-1","type":"reasoning","summary":[],"content":[]}]},{"id":"turn-2","status":"completed","items":[{"id":"user-2","type":"userMessage","content":[{"type":"text","text":"rollback"}]}]}]},"model":"gpt-5.6","reasoningEffort":"high"}`
+	if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{BridgeId: "bridge-1", BlockId: "block-12345678", Kind: "snapshot", Data: initial}); err != nil {
+		t.Fatalf("initial snapshot: %v", err)
+	}
+	session, _ := registry.Get("block-12345678")
+	if len(session.Messages) != 3 || session.Messages[1].Kind != "reasoning" || session.Messages[1].Text != "" {
+		t.Fatalf("empty completed reasoning was not preserved: %#v", session.Messages)
+	}
+	rollback := `{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[{"id":"turn-1","status":"completed","items":[{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"keep"}]},{"id":"reason-1","type":"reasoning","summary":[],"content":[]}]}]}}`
+	if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{BridgeId: "bridge-1", BlockId: "block-12345678", Kind: "history-snapshot", Data: rollback}); err != nil {
+		t.Fatalf("rollback snapshot: %v", err)
+	}
+	session, _ = registry.Get("block-12345678")
+	if len(session.Messages) != 2 || findMessage(&session, "user-2") != nil {
+		t.Fatalf("rollback did not replace history: %#v", session.Messages)
+	}
+	if session.Model != "gpt-5.6" || session.ReasoningEffort != "high" {
+		t.Fatalf("rollback cleared session metadata: %#v", session)
+	}
+	wrongThread := `{"thread":{"id":"other-thread","status":{"type":"idle"},"turns":[]}}`
+	if err := registry.ApplyEvent(wshrpc.CodexSessionEventData{BridgeId: "bridge-1", BlockId: "block-12345678", Kind: "history-snapshot", Data: wrongThread}); err == nil {
+		t.Fatal("mismatched rollback snapshot was accepted")
 	}
 }
 

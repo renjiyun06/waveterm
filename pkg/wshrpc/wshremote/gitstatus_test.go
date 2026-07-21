@@ -120,3 +120,34 @@ func TestGetGitStatusAndFileDiff(t *testing.T) {
 		t.Fatalf("unexpected untracked file hunk: %#v", untrackedDiff.Hunks[0])
 	}
 }
+
+func TestGitStatusCanProbeNestedRepositoryWithoutScanningParent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	workspaceDir := t.TempDir()
+	repoDir := filepath.Join(workspaceDir, "nested", "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repoDir, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parentStatus, err := getGitStatus(context.Background(), workspaceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentStatus.IsRepo {
+		t.Fatalf("non-Git parent was reported as a repository: %#v", parentStatus)
+	}
+
+	nestedStatus, err := getGitStatus(context.Background(), repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nestedStatus.IsRepo || !nestedStatus.Dirty || filepath.ToSlash(repoDir) != nestedStatus.Root {
+		t.Fatalf("nested repository probe failed: %#v", nestedStatus)
+	}
+}
