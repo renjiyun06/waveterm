@@ -25,19 +25,19 @@ func TestIsWshVersionUpToDateRequiresCodexWebCapability(t *testing.T) {
 		t.Fatal("helper without the Codex Web capability was accepted")
 	}
 
-	upToDate, version, _, err := IsWshVersionUpToDate(context.Background(), "wsh v0.14.5+wavecodex2")
+	upToDate, version, _, err := IsWshVersionUpToDate(context.Background(), "wsh v0.14.5+wavecodex3")
 	if err != nil {
 		t.Fatalf("capable version: %v", err)
 	}
-	if !upToDate || version != "v0.14.5+wavecodex2" {
+	if !upToDate || version != "v0.14.5+wavecodex3" {
 		t.Fatalf("capable helper rejected: upToDate=%v version=%q", upToDate, version)
 	}
 
-	upToDate, version, _, err = IsWshVersionUpToDate(context.Background(), "wsh v0.14.5+wavecodex1")
+	upToDate, version, _, err = IsWshVersionUpToDate(context.Background(), "wsh v0.14.5+wavecodex2")
 	if err != nil {
 		t.Fatalf("previous helper revision: %v", err)
 	}
-	if upToDate || version != "v0.14.5+wavecodex1" {
+	if upToDate || version != "v0.14.5+wavecodex2" {
 		t.Fatalf("previous helper revision was accepted: upToDate=%v version=%q", upToDate, version)
 	}
 }

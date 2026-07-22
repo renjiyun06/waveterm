@@ -9,12 +9,14 @@ import { fireAndForget, isBlank, makeConnRoute } from "@/util/util";
 import { formatRemoteUri } from "@/util/waveutil";
 import * as jotai from "jotai";
 import { FileWorkspaceView } from "./fileworkspace";
+import type { FileWorkspaceGitStatus } from "./fileworkspace-git";
 import {
     getGitStatusForPath,
     getGitStatusKey,
     getGitStatusKeyPrefix,
     getRootGitStatuses,
     normalizeGitPath,
+    withGitStatusWorkspaceRoot,
 } from "./fileworkspace-git";
 import type { FileWorkspaceEnv } from "./fileworkspaceenv";
 
@@ -88,7 +90,7 @@ export class FileWorkspaceViewModel implements ViewModel {
     explorerLayoutVersionAtom = jotai.atom<number>(0);
     directoryStatesAtom = jotai.atom<Record<string, FileWorkspaceDirectoryState>>({});
     expandedDirectoriesAtom = jotai.atom<string[]>([]);
-    gitStatusesAtom = jotai.atom<Record<string, GitStatusResponse>>({});
+    gitStatusesAtom = jotai.atom<Record<string, FileWorkspaceGitStatus>>({});
     gitErrorsAtom = jotai.atom<Record<string, string>>({});
     addRootOpenAtom = jotai.atom<boolean>(false);
     addRootPathAtom = jotai.atom<string>("~");
@@ -103,7 +105,7 @@ export class FileWorkspaceViewModel implements ViewModel {
     activeConnection: string;
     workspaceStates: FileWorkspaceState[] = [];
     gitProbePaths = new Set<string>();
-    gitProbePromises = new Map<string, Promise<GitStatusResponse | null>>();
+    gitProbePromises = new Map<string, Promise<FileWorkspaceGitStatus | null>>();
     removedRootIds = new Set<string>();
 
     constructor(initOpts: ViewModelInitType) {
@@ -596,7 +598,7 @@ export class FileWorkspaceViewModel implements ViewModel {
         await this.showTab(tab);
     }
 
-    async probeGitStatus(root: FileWorkspaceRoot, path: string, force = false): Promise<GitStatusResponse | null> {
+    async probeGitStatus(root: FileWorkspaceRoot, path: string, force = false): Promise<FileWorkspaceGitStatus | null> {
         const probeKey = getDirectoryKey(root.id, normalizeGitPath(path));
         if (!force && this.gitProbePaths.has(probeKey)) {
             return getGitStatusForPath(globalStore.get(this.gitStatusesAtom), root.id, path) ?? null;
@@ -608,14 +610,15 @@ export class FileWorkspaceViewModel implements ViewModel {
         return promise;
     }
 
-    async refreshGitStatus(root: FileWorkspaceRoot, path = root.path): Promise<GitStatusResponse | null> {
+    async refreshGitStatus(root: FileWorkspaceRoot, path = root.path): Promise<FileWorkspaceGitStatus | null> {
         const probeKey = getDirectoryKey(root.id, normalizeGitPath(path));
         try {
-            const response = await this.env.rpc.RemoteGitStatusCommand(
+            const rpcResponse = await this.env.rpc.RemoteGitStatusCommand(
                 TabRpcClient,
                 { path },
                 { route: makeConnRoute(root.connection), timeout: 10000 }
             );
+            const response = withGitStatusWorkspaceRoot(rpcResponse, path);
             if (this.disposed || this.removedRootIds.has(root.id)) {
                 return response;
             }
@@ -651,7 +654,7 @@ export class FileWorkspaceViewModel implements ViewModel {
         this.gitRefreshPending = true;
         try {
             const statuses = globalStore.get(this.gitStatusesAtom);
-            const refreshes: Promise<GitStatusResponse | null>[] = [];
+            const refreshes: Promise<FileWorkspaceGitStatus | null>[] = [];
             for (const root of this.getActiveRoots()) {
                 const repositories = getRootGitStatuses(statuses, root.id);
                 if (repositories.length === 0) {
@@ -659,7 +662,7 @@ export class FileWorkspaceViewModel implements ViewModel {
                     continue;
                 }
                 for (const repository of repositories) {
-                    refreshes.push(this.refreshGitStatus(root, repository.root));
+                    refreshes.push(this.refreshGitStatus(root, repository.workspaceRoot ?? repository.root));
                 }
             }
             await Promise.all(refreshes);

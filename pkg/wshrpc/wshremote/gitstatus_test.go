@@ -100,6 +100,9 @@ func TestGetGitStatusAndFileDiff(t *testing.T) {
 	if !status.IsRepo || !status.Dirty || len(status.Files) != 2 {
 		t.Fatalf("unexpected Git status: %#v", status)
 	}
+	if status.ResolvedPath != filepath.ToSlash(repoDir) {
+		t.Fatalf("resolved path = %q, want %q", status.ResolvedPath, filepath.ToSlash(repoDir))
+	}
 
 	diff, err := getGitFileDiff(context.Background(), trackedPath)
 	if err != nil {
@@ -149,5 +152,30 @@ func TestGitStatusCanProbeNestedRepositoryWithoutScanningParent(t *testing.T) {
 	}
 	if !nestedStatus.IsRepo || !nestedStatus.Dirty || filepath.ToSlash(repoDir) != nestedStatus.Root {
 		t.Fatalf("nested repository probe failed: %#v", nestedStatus)
+	}
+}
+
+func TestGitStatusReportsResolvedTildePath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	repoDir := filepath.Join(homeDir, "workspace", "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repoDir, "init", "--quiet")
+
+	status, err := getGitStatus(context.Background(), "~/workspace/repo/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.IsRepo || status.Root != filepath.ToSlash(repoDir) {
+		t.Fatalf("unexpected Git status: %#v", status)
+	}
+	wantResolved := filepath.ToSlash(filepath.Join(repoDir, "src"))
+	if status.ResolvedPath != wantResolved {
+		t.Fatalf("resolved path = %q, want %q", status.ResolvedPath, wantResolved)
 	}
 }

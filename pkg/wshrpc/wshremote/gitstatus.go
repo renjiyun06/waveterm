@@ -152,14 +152,19 @@ func getGitAheadBehind(ctx context.Context, root string) (int, int) {
 }
 
 func getGitStatus(ctx context.Context, path string) (*wshrpc.GitStatusResponse, error) {
-	root, isRepo, err := findGitRoot(ctx, path)
+	resolvedPath, err := resolveGitPath(path)
+	if err != nil {
+		return nil, err
+	}
+	root, isRepo, err := findGitRoot(ctx, resolvedPath)
 	if err != nil {
 		return nil, err
 	}
 	response := &wshrpc.GitStatusResponse{
-		IsRepo: isRepo,
-		Files:  []wshrpc.GitFileStatus{},
-		Ts:     time.Now().UnixMilli(),
+		IsRepo:       isRepo,
+		ResolvedPath: filepath.ToSlash(resolvedPath),
+		Files:        []wshrpc.GitFileStatus{},
+		Ts:           time.Now().UnixMilli(),
 	}
 	if !isRepo {
 		return response, nil

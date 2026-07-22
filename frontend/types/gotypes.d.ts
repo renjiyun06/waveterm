@@ -1121,6 +1121,7 @@ declare global {
         isrepo: boolean;
         dirty: boolean;
         root?: string;
+        resolvedpath?: string;
         branch?: string;
         ahead?: number;
         behind?: number;

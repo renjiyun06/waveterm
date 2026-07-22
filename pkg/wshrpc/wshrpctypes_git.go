@@ -27,14 +27,15 @@ type GitFileStatus struct {
 }
 
 type GitStatusResponse struct {
-	IsRepo bool            `json:"isrepo"`
-	Dirty  bool            `json:"dirty"`
-	Root   string          `json:"root,omitempty"`
-	Branch string          `json:"branch,omitempty"`
-	Ahead  int             `json:"ahead,omitempty"`
-	Behind int             `json:"behind,omitempty"`
-	Files  []GitFileStatus `json:"files,omitempty"`
-	Ts     int64           `json:"ts"`
+	IsRepo       bool            `json:"isrepo"`
+	Dirty        bool            `json:"dirty"`
+	Root         string          `json:"root,omitempty"`
+	ResolvedPath string          `json:"resolvedpath,omitempty"`
+	Branch       string          `json:"branch,omitempty"`
+	Ahead        int             `json:"ahead,omitempty"`
+	Behind       int             `json:"behind,omitempty"`
+	Files        []GitFileStatus `json:"files,omitempty"`
+	Ts           int64           `json:"ts"`
 }
 
 type GitDiffHunk struct {
